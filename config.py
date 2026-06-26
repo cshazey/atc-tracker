@@ -1,3 +1,5 @@
+import os
+
 STREAM_URL = "https://s1-bos.liveatc.net/ybcg3_centre"
 
 STREAM_HEADERS = {
@@ -45,3 +47,12 @@ KEYWORDS = [
     "SQUAWK 7600",
     "SQUAWK 7500",
 ]
+
+# ---------------------------------------------------------------------------
+# Telegram integration
+# Set credentials via environment variables or edit the values below directly.
+# TELEGRAM_ENABLED is automatically True when both are non-empty.
+# ---------------------------------------------------------------------------
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)

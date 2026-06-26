@@ -2,7 +2,8 @@
 """
 ATC Tracker — YBCG Brisbane Centre live speech-to-text transcription.
 Streams MP3 audio from LiveATC.net, detects transmissions via VAD,
-transcribes with Whisper, and highlights configurable keywords.
+transcribes with Whisper, highlights configurable keywords, and forwards
+every transmission to Telegram when credentials are configured.
 
 Controls:
   K — toggle keyword highlighting on/off
@@ -11,6 +12,7 @@ Controls:
 
 import argparse
 import collections
+import html
 import queue
 import sys
 import threading
@@ -218,6 +220,7 @@ class Transcriber:
         prefix = Text(f"[{ts}] TX  ", style="bold green")
         content = _highlight_keywords(text, KEYWORDS, enabled=self._state.keywords_enabled)
         self._console.print(Text.assemble(prefix, content))
+        _send_telegram(text, ts, _has_keywords(text, KEYWORDS))
 
     def shutdown(self):
         self._queue.put(None)
@@ -267,6 +270,43 @@ def _highlight_keywords(text: str, keywords: list, enabled: bool) -> Text:
     if pos < len(text):
         result.append(text[pos:])
     return result
+
+
+# ---------------------------------------------------------------------------
+# Keyword detection helper
+# ---------------------------------------------------------------------------
+
+def _has_keywords(text: str, keywords: list) -> bool:
+    lower = text.lower()
+    return any(kw.lower() in lower for kw in keywords)
+
+
+# ---------------------------------------------------------------------------
+# Telegram sender
+# ---------------------------------------------------------------------------
+
+def _send_telegram(text: str, ts: str, has_keywords: bool) -> None:
+    if not config.TELEGRAM_ENABLED:
+        return
+    emoji = "🔴" if has_keywords else "📻"
+    header = (
+        f"{emoji} <b>[KEYWORD ALERT]</b> YBCG Brisbane Centre"
+        if has_keywords
+        else f"{emoji} YBCG Brisbane Centre"
+    )
+    message = f"{header}\n<code>[{ts}]</code> {html.escape(text)}"
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": config.TELEGRAM_CHAT_ID,
+                "text": message,
+                "parse_mode": "HTML",
+            },
+            timeout=10,
+        )
+    except Exception:
+        pass  # never crash the tracker because of a Telegram hiccup
 
 
 # ---------------------------------------------------------------------------
@@ -437,11 +477,17 @@ def main():
 
     model = args.model or WHISPER_MODEL
 
+    tg_status = (
+        f"[green]ON[/green] → chat {config.TELEGRAM_CHAT_ID}"
+        if config.TELEGRAM_ENABLED
+        else "[yellow]OFF[/yellow]  (set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID to enable)"
+    )
     console.rule("[bold]ATC Tracker[/bold]")
     console.print(f"Station : [cyan]YBCG Brisbane Centre (Gold Coast)[/cyan]")
     console.print(f"Stream  : [dim]{STREAM_URL}[/dim]")
     console.print(f"Model   : [cyan]{model}[/cyan]  (downloads ~230 MB on first run)")
     console.print(f"Keywords: [cyan]{'OFF' if args.no_keywords else 'ON'}[/cyan]  (press K to toggle)")
+    console.print(f"Telegram: {tg_status}")
     console.rule()
 
     state = SharedState(keywords_enabled=not args.no_keywords)
