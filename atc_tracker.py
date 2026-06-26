@@ -16,9 +16,12 @@ import collections
 import html
 import queue
 import re
+import shutil
+import sys
 import threading
 import time
 from datetime import datetime, timezone
+from io import StringIO
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -28,8 +31,7 @@ import mlx_whisper
 import numpy as np
 from scipy.signal import butter, sosfilt
 import requests
-from rich.console import Console, Group
-from rich.live import Live
+from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
@@ -95,11 +97,16 @@ class SharedState:
 # ---------------------------------------------------------------------------
 
 class LiveDisplay:
-    """Thread-safe live UI: fixed status header + scrolling transmission log.
+    """Renders the TUI at ~10 fps from a dedicated thread.
 
-    All threads call .log(Text) or .refresh(). Rich's Live handles rendering
-    on the main thread so output never interleaves.
+    Uses Rich only for formatting (Panel/Text/color); cursor control is done
+    directly with ANSI sequences so it works regardless of how the process
+    was launched. All worker threads call .log() and the render thread owns
+    stdout exclusively while active.
     """
+
+    # header: top-border + 2 info lines + 2 separators + N station lines + controls + bottom-border
+    _HEADER_LINES = 7  # base count excluding stations
 
     def __init__(self, model: str, state: SharedState, console: Console):
         self._model = model
@@ -107,12 +114,10 @@ class LiveDisplay:
         self._console = console
         self._lines: collections.deque = collections.deque(maxlen=500)
         self._lock = threading.Lock()
-        self._live = Live(
-            self._render(),
-            console=console,
-            auto_refresh=True,
-            refresh_per_second=10,
-            transient=False,
+        self._stop = threading.Event()
+        self._prev_height = 0
+        self._thread = threading.Thread(
+            target=self._loop, daemon=True, name="render"
         )
 
     # ── Public API (thread-safe) ────────────────────────────────────────────
@@ -120,24 +125,81 @@ class LiveDisplay:
     def log(self, line: Text) -> None:
         with self._lock:
             self._lines.append(line)
-        self._do_refresh()
 
     def refresh(self) -> None:
-        self._do_refresh()
-
-    def _do_refresh(self) -> None:
-        self._live.update(self._render())
+        pass  # render loop picks up changes on next tick
 
     # ── Context manager ─────────────────────────────────────────────────────
 
     def __enter__(self):
-        self._live.__enter__()
+        self._thread.start()
         return self
 
     def __exit__(self, *args):
-        self._live.__exit__(*args)
+        self._stop.set()
+        self._thread.join(timeout=2)
 
-    # ── Rendering ───────────────────────────────────────────────────────────
+    # ── Render loop ─────────────────────────────────────────────────────────
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            self._draw()
+            time.sleep(0.1)
+
+    def _draw(self) -> None:
+        cols, rows = shutil.get_terminal_size((80, 24))
+        header_size = self._HEADER_LINES + len(STREAMS)
+        log_visible = max(3, rows - header_size - 4)
+
+        # Render panels into a string buffer using Rich for colour/borders
+        buf = StringIO()
+        tmp = Console(
+            file=buf, width=cols,
+            force_terminal=True, force_interactive=True,
+            highlight=False, no_color=False,
+        )
+        tmp.print(Panel(
+            self._build_header(),
+            title="[bold cyan]ATC Tracker[/bold cyan]",
+            border_style="cyan",
+        ))
+
+        with self._lock:
+            visible = list(self._lines)[-log_visible:]
+
+        if visible:
+            log_text = Text()
+            for i, line in enumerate(visible):
+                log_text.append_text(line)
+                if i < len(visible) - 1:
+                    log_text.append("\n")
+        else:
+            log_text = Text("  waiting for transmissions...", style="dim")
+
+        tmp.print(Panel(
+            log_text,
+            title="[dim]Transmissions[/dim]",
+            border_style="dim",
+        ))
+
+        lines = buf.getvalue().splitlines()
+        height = len(lines)
+
+        # Build one output string: cursor-up, then overwrite each line
+        out: list = []
+        if self._prev_height > 0:
+            out.append(f"\033[{self._prev_height}A\r")
+        for line in lines:
+            out.append(f"\r\033[2K{line}\n")
+        # Clear leftover lines if render shrank
+        for _ in range(max(0, self._prev_height - height)):
+            out.append("\r\033[2K\n")
+
+        sys.stdout.write("".join(out))
+        sys.stdout.flush()
+        self._prev_height = height
+
+    # ── Header ──────────────────────────────────────────────────────────────
 
     def _build_header(self) -> Text:
         h = Text()
@@ -170,40 +232,6 @@ class LiveDisplay:
         h.append("  [K] keywords   [P] pause/resume   [Q] quit", style="dim")
 
         return h
-
-    def _render(self) -> Group:
-        # header: 2 border lines + 2 info lines + 2 separators + N station lines + 1 controls line
-        header_size = 7 + len(STREAMS)
-
-        header_panel = Panel(
-            self._build_header(),
-            title="[bold cyan]ATC Tracker[/bold cyan]",
-            border_style="cyan",
-        )
-
-        term_h = self._console.height or 40
-        # -4: 2 for log panel borders, 2 for breathing room
-        log_visible = max(3, term_h - header_size - 4)
-
-        with self._lock:
-            visible = list(self._lines)[-log_visible:]
-
-        if visible:
-            log_text = Text()
-            for i, line in enumerate(visible):
-                log_text.append_text(line)
-                if i < len(visible) - 1:
-                    log_text.append("\n")
-        else:
-            log_text = Text("  waiting for transmissions...", style="dim")
-
-        log_panel = Panel(
-            log_text,
-            title="[dim]Transmissions[/dim]",
-            border_style="dim",
-        )
-
-        return Group(header_panel, log_panel)
 
 
 # Module-level display reference used by _post_telegram (set in main).
