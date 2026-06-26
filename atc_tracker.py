@@ -277,19 +277,13 @@ def _highlight_keywords(text: str, keywords: list, enabled: bool) -> Text:
 
 
 # ---------------------------------------------------------------------------
-# Telegram sender
+# Telegram helpers
 # ---------------------------------------------------------------------------
 
-def _send_telegram(text: str, ts: str, icao: str, station_name: str, has_keywords: bool) -> None:
+def _post_telegram(message: str) -> None:
+    """Low-level send — all Telegram calls go through here."""
     if not config.TELEGRAM_ENABLED:
         return
-    label = f"{icao} {station_name}"
-    header = (
-        f"🔴 <b>[KEYWORD ALERT]</b> {label}"
-        if has_keywords
-        else f"📻 {label}"
-    )
-    message = f"{header}\n<code>[{ts}]</code> {html.escape(text)}"
     try:
         requests.post(
             f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage",
@@ -302,6 +296,26 @@ def _send_telegram(text: str, ts: str, icao: str, station_name: str, has_keyword
         )
     except Exception:
         pass
+
+
+def _send_telegram(text: str, ts: str, icao: str, station_name: str, has_keywords: bool) -> None:
+    label = f"{icao} {station_name}"
+    header = (
+        f"🔴 <b>[KEYWORD ALERT]</b> {label}"
+        if has_keywords
+        else f"📻 {label}"
+    )
+    _post_telegram(f"{header}\n<code>[{ts}]</code> {html.escape(text)}")
+
+
+def _send_startup_notification(state: SharedState) -> None:
+    ts = datetime.now().strftime("%H:%M:%S")
+    lines = [f"🟢 <b>ATC Tracker started</b>  <code>[{ts}]</code>", ""]
+    for s in STREAMS:
+        enabled = state.is_enabled(s["icao"])
+        icon = "✅" if enabled else "🔇"
+        lines.append(f"{icon} {s['icao']} {s['name']}")
+    _post_telegram("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
@@ -540,6 +554,8 @@ def main():
             name=f"stream-{stream_cfg['icao']}",
         )
         t.start()
+
+    _send_startup_notification(state)
 
     try:
         state.stop_event.wait()
