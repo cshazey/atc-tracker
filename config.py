@@ -54,7 +54,7 @@ STREAMS = [
     },
 ]
 
-WHISPER_MODEL = "mlx-community/whisper-small"
+WHISPER_MODEL = "mlx-community/whisper-small-mlx"
 
 VAD_SAMPLE_RATE = 16000
 VAD_CHUNK_FRAMES = 320        # 20ms at 16kHz
