@@ -1,5 +1,13 @@
 import os
 
+# Load .env automatically so credentials work whether you use run.command
+# or call python3 atc_tracker.py directly.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 _HEADERS = {
     "accept": "*/*",
     "accept-language": "en-GB,en;q=0.9",

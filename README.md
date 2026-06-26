@@ -1,79 +1,176 @@
 # ATC Tracker
 
-Real-time speech-to-text transcription of YBCG Brisbane Centre (Gold Coast) ATC audio from [LiveATC.net](https://www.liveatc.net).
+Real-time speech-to-text transcription of live ATC audio from [LiveATC.net](https://www.liveatc.net), running locally on Apple Silicon via MLX Whisper.
 
-Streams the live MP3 feed, detects each radio transmission via voice activity detection, transcribes with [Whisper](https://github.com/openai/whisper) running locally on Apple Silicon via MLX, and logs the result to your terminal. Keywords like MILITARY, MAYDAY, F-18 etc. are highlighted in red.
+Currently monitoring:
+- **YBCG** — Brisbane Centre (Gold Coast)
+- **YSPT** — Southport
+
+Detects each radio call via voice activity detection, transcribes it, logs it to the terminal, and optionally forwards every transmission to Telegram. Keywords like MILITARY, MAYDAY, F-18 etc. are highlighted in red and flagged in Telegram.
+
+---
 
 ## Requirements
 
 - macOS on Apple Silicon (M1/M2/M3/M4)
 - Python 3.10+
 
+---
+
 ## Setup
 
-```bash
-pip install miniaudio mlx-whisper requests numpy rich
-```
+### 1. Configure credentials
 
-The Whisper model (`whisper-small.en`, ~230 MB) downloads automatically from HuggingFace on first run and is cached in `~/.cache/huggingface/`.
-
-## Usage
+Copy `.env.example` to `.env` and fill in your Telegram details:
 
 ```bash
-python atc_tracker.py
+cp .env.example .env
 ```
 
-### Controls (while running)
-
-| Key | Action |
-|-----|--------|
-| `K` | Toggle keyword highlighting on/off |
-| `Q` or `Ctrl+C` | Quit |
-
-### Options
+Then open `.env` and set:
 
 ```
---model REPO       Whisper model to use (default: mlx-community/whisper-small.en)
-                   Faster but less accurate: mlx-community/whisper-tiny.en
---no-keywords      Start with keyword highlighting disabled
---calibrate        Print live RMS values for 15s to tune VAD threshold
+TELEGRAM_BOT_TOKEN=123456789:ABCdef...
+TELEGRAM_CHAT_ID=987654321
 ```
+
+> Telegram is optional — the tracker logs to terminal without it. See [Telegram setup](#telegram-setup) below.
+
+### 2. Run
+
+**Double-click `run.command`** in Finder — Terminal opens and it starts automatically.
+
+Or from the command line:
+
+```bash
+bash run.command
+```
+
+On **first run** it creates a virtual environment and installs all dependencies automatically. After that it starts immediately.
+
+---
 
 ## Terminal output
 
 ```
-──────────────────── ATC Tracker ────────────────────
-Station : YBCG Brisbane Centre (Gold Coast)
-Stream  : https://s1-bos.liveatc.net/ybcg3_centre
+──────────────── ATC Tracker ────────────────
+Stations: YBCG Brisbane Centre  |  YSPT Southport
 Model   : mlx-community/whisper-small.en
 Keywords: ON  (press K to toggle)
-──────────────────────────────────────────────────────
-[10:42:31] Connected — YBCG Brisbane Centre | Keywords: ON | Press K to toggle, Q to quit
-[10:42:38] TX   Golf Bravo Charlie cleared COASTAL two departure runway two eight
-[10:43:15] TX   MAYDAY MAYDAY MAYDAY Sunstate 654 engine failure
-[10:44:01] TX   F-18 formation track RESTRICTED area 7 Delta
+Telegram: ON → chat 987654321
+──────────────────────────────────────────────
+[10:42:31] YBCG Brisbane Centre    │ Connected
+[10:42:31] YSPT Southport          │ Connected
+[10:42:38] YBCG Brisbane Centre    │ Golf Bravo Charlie cleared COASTAL two departure runway two eight
+[10:43:01] YSPT Southport          │ Southport traffic, Cessna 172 final runway one four
+[10:43:15] YBCG Brisbane Centre    │ MAYDAY MAYDAY MAYDAY Sunstate 654 engine failure
+[10:44:01] YBCG Brisbane Centre    │ F-18 formation track RESTRICTED area seven delta
 ```
 
-Keywords (`MILITARY`, `F18`, `F-18`, `18`, `EIGHTEEN`, `COASTAL`, `RESTRICTED`, `EMERGENCY`, `MAYDAY`, `PAN-PAN`, `GUARD`, `500`, `SQUAWK 7700/7600/7500`) appear in **bold red** inline.
+Keywords appear in **bold red** inline. All transmissions are always logged — keyword highlighting is cosmetic only.
 
-All transmissions are always logged. Keyword highlighting is cosmetic only — toggling it does not filter any output.
+---
+
+## Controls
+
+| Key | Action |
+|-----|--------|
+| `K` | Toggle keyword highlighting on/off (does not affect Telegram) |
+| `Q` or `Ctrl+C` | Quit |
+
+---
+
+## Options
+
+Pass flags after `atc_tracker.py` by editing the last line of `run.command`, or run directly:
+
+```bash
+venv/bin/python atc_tracker.py --model mlx-community/whisper-tiny.en   # faster, less accurate
+venv/bin/python atc_tracker.py --no-keywords                            # start with highlighting off
+venv/bin/python atc_tracker.py --calibrate YBCG                        # print live RMS values for YBCG
+venv/bin/python atc_tracker.py --calibrate YSPT                        # print live RMS values for YSPT
+```
+
+---
+
+## Telegram setup
+
+1. Message `@BotFather` on Telegram → send `/newbot` → copy the token
+2. Message `@userinfobot` on Telegram → copy your numeric chat ID
+3. Send `/start` to your new bot (so it can message you)
+4. Paste both values into `.env`
+
+The tracker sends every transcription to your chat. Keyword matches get a 🔴 prefix:
+
+```
+📻 YBCG Brisbane Centre
+[10:42:38] Golf Bravo Charlie cleared COASTAL two departure runway two eight
+
+🔴 [KEYWORD ALERT] YBCG Brisbane Centre
+[10:43:15] MAYDAY MAYDAY MAYDAY Sunstate 654 engine failure
+```
+
+---
+
+## Adding stations
+
+Edit `STREAMS` in `config.py` to add more LiveATC feeds:
+
+```python
+STREAMS = [
+    {
+        "icao": "YBCG",
+        "name": "Brisbane Centre",
+        "url": "https://s1-bos.liveatc.net/ybcg3_centre",
+        "headers": _HEADERS,
+    },
+    {
+        "icao": "YSPT",
+        "name": "Southport",
+        "url": "https://s1-bos.liveatc.net/yspt2",
+        "headers": _HEADERS,
+    },
+    # Add more here...
+]
+```
+
+Each station streams and transcribes independently in its own thread.
+
+---
+
+## Adding keywords
+
+Edit the `KEYWORDS` list in `config.py`:
+
+```python
+KEYWORDS = [
+    "MILITARY",
+    "MAYDAY",
+    # add your own here...
+]
+```
+
+---
 
 ## VAD calibration
 
-If you're seeing too many false positives (spurious short transcriptions during silence) or missing transmissions, run calibrate mode to check the RMS levels on this stream:
+If you're getting false positives or missing calls, check the live RMS levels:
 
 ```bash
-python atc_tracker.py --calibrate
+venv/bin/python atc_tracker.py --calibrate YBCG
 ```
 
-Then adjust `VAD_RMS_THRESHOLD` in `config.py`. A typical pre-squelched ATC stream sits near `0.000` in silence and spikes to `0.010+` during transmissions.
+Silence should read near `0.000`; transmissions spike above `0.003`. Adjust `VAD_RMS_THRESHOLD` in `config.py` accordingly.
 
-## Configuration
+---
 
-Edit `config.py` to change:
+## Configuration reference
 
-- `STREAM_URL` — point at a different LiveATC feed
-- `KEYWORDS` — add or remove keyword strings
-- `WHISPER_MODEL` — swap Whisper model
-- `VAD_RMS_THRESHOLD` — sensitivity of transmission detection
-- `VAD_SILENCE_HANGOVER` — how many seconds of silence before a TX is considered finished
+| File | What to edit |
+|------|-------------|
+| `.env` | Telegram credentials |
+| `config.py` → `STREAMS` | Add/remove ATC feeds |
+| `config.py` → `KEYWORDS` | Add/remove flagged keywords |
+| `config.py` → `WHISPER_MODEL` | Swap Whisper model size |
+| `config.py` → `VAD_RMS_THRESHOLD` | Tune sensitivity |
+| `config.py` → `VAD_SILENCE_HANGOVER` | Silence gap before TX is considered done |
