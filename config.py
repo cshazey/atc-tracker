@@ -54,7 +54,19 @@ STREAMS = [
     },
 ]
 
-WHISPER_MODEL = "mlx-community/whisper-small-mlx"
+WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
+
+WHISPER_INITIAL_PROMPT = (
+    "Brisbane Centre, Alpha Bravo Charlie, squawk four two one six, QNH one zero one three, "
+    "descend flight level one eight zero, cleared ILS approach runway one four, "
+    "contact Gold Coast Tower one one eight decimal seven, wilco. "
+    "Juliet Yankee Foxtrot, inbound Coolangatta, request traffic information. "
+    "YSSY YBBN YBCG YMML YPPH YPAD YBTL Coolangatta Archerfield Williamtown Amberley Archerfield. "
+    "RAAF Williamtown, Hornet formation, C130 Hercules, P-8 Poseidon, Dragon one, Roulette four. "
+    "squawk seven thousand seven hundred, MAYDAY MAYDAY MAYDAY, affirm, negative, roger."
+)
+
+AUDIO_PREPROCESSING = True
 
 VAD_SAMPLE_RATE = 16000
 VAD_CHUNK_FRAMES = 320        # 20ms at 16kHz
@@ -63,6 +75,13 @@ VAD_SILENCE_HANGOVER = 1.5    # seconds of trailing silence before flushing TX
 
 MAX_TRANSMISSION_SEC = 60
 RECONNECT_DELAY_SEC = 5
+
+ATC_CORRECTIONS = [
+    (r'\bQHD\b', 'QNH'),
+    (r'\bDesmond\b', 'decimal'),
+    (r'\bRager\b', 'roger'),
+    (r'\bRaja\b', 'roger'),
+]
 
 KEYWORDS = [
     "MILITARY",

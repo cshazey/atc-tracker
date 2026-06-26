@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 import miniaudio
 import mlx_whisper
 import numpy as np
+from scipy.signal import butter, sosfilt
 import requests
 from rich.console import Console
 from rich.layout import Layout
@@ -35,6 +36,8 @@ from rich.text import Text
 
 import config
 from config import (
+    ATC_CORRECTIONS,
+    AUDIO_PREPROCESSING,
     KEYWORDS,
     MAX_TRANSMISSION_SEC,
     RECONNECT_DELAY_SEC,
@@ -43,6 +46,7 @@ from config import (
     VAD_RMS_THRESHOLD,
     VAD_SAMPLE_RATE,
     VAD_SILENCE_HANGOVER,
+    WHISPER_INITIAL_PROMPT,
     WHISPER_MODEL,
 )
 
@@ -62,6 +66,7 @@ def _now_ts() -> str:
 class SharedState:
     def __init__(self, keywords_enabled: bool):
         self.keywords_enabled = keywords_enabled
+        self.paused = False
         self.stop_event = threading.Event()
         self._lock = threading.Lock()
         self.station_enabled: dict = {}
@@ -71,6 +76,11 @@ class SharedState:
         with self._lock:
             self.keywords_enabled = not self.keywords_enabled
             return self.keywords_enabled
+
+    def toggle_pause(self) -> bool:
+        with self._lock:
+            self.paused = not self.paused
+            return self.paused
 
     def toggle_station(self, icao: str) -> bool:
         with self._lock:
@@ -142,9 +152,12 @@ class LiveDisplay:
         h.append("  Telegram: ", style="dim")
         if config.TELEGRAM_ENABLED:
             h.append("ON", style="green")
-            h.append(f"  →  {config.TELEGRAM_CHAT_ID}  (/help for commands)\n", style="dim")
+            h.append(f"  →  {config.TELEGRAM_CHAT_ID}  (/help for commands)", style="dim")
         else:
-            h.append("OFF\n", style="yellow")
+            h.append("OFF", style="yellow")
+        if self._state.paused:
+            h.append("  ⏸ PAUSED", style="bold red")
+        h.append("\n")
 
         h.append("  " + "─" * 50 + "\n", style="dim cyan")
 
@@ -155,7 +168,7 @@ class LiveDisplay:
                      style="green" if enabled else "red")
 
         h.append("  " + "─" * 50 + "\n", style="dim cyan")
-        h.append("  [K] keywords   [Q] quit", style="dim")
+        h.append("  [K] keywords   [P] pause/resume   [Q] quit", style="dim")
 
         return h
 
@@ -280,6 +293,28 @@ class VoiceActivityDetector:
         return float(np.sqrt(np.mean(chunk ** 2))) > self.threshold
 
 
+class AudioPreprocessor:
+    """Bandpass filter (300–3400 Hz) + amplitude normalisation for VHF radio audio."""
+
+    _SR = VAD_SAMPLE_RATE
+
+    def __init__(self, enabled: bool = True):
+        self.enabled = enabled
+        self._sos = butter(4, [300 / 8000.0, 3400 / 8000.0], btype='bandpass', output='sos')
+
+    def process(self, audio: np.ndarray) -> np.ndarray:
+        if not self.enabled or len(audio) == 0:
+            return audio
+        filtered = sosfilt(self._sos, audio).astype(np.float32)
+        peak = float(np.percentile(np.abs(filtered), 95))
+        if peak > 1e-6:
+            filtered = (filtered * (0.7 / peak)).clip(-1.0, 1.0).astype(np.float32)
+        return filtered
+
+
+_preprocessor = AudioPreprocessor(enabled=AUDIO_PREPROCESSING)
+
+
 # ---------------------------------------------------------------------------
 # Transmission audio buffer
 # ---------------------------------------------------------------------------
@@ -316,6 +351,7 @@ class Transcriber:
         self._state = state
         self._log_file = log_file
         self._queue: queue.Queue = queue.Queue(maxsize=8)
+        self._recent: dict = {}  # icao -> (text, monotonic_time) for dedup
         self._thread = threading.Thread(target=self._worker, daemon=True, name="transcriber")
         self._thread.start()
 
@@ -344,9 +380,12 @@ class Transcriber:
                     audio,
                     path_or_hf_repo=self._model,
                     language="en",
-                    verbose=False,
-                    temperature=0.0,
+                    verbose=None,
+                    temperature=(0.0, 0.2, 0.4),
+                    compression_ratio_threshold=2.0,
                     no_speech_threshold=0.6,
+                    condition_on_previous_text=False,
+                    initial_prompt=WHISPER_INITIAL_PROMPT,
                 )
                 text = (result.get("text") or "").strip()
                 if text:
@@ -364,6 +403,14 @@ class Transcriber:
                 self._queue.task_done()
 
     def _log(self, text: str, icao: str, station_name: str, ts: str, duration: float = 0.0):
+        text = _apply_atc_corrections(text)
+        if _is_hallucination(text):
+            return
+        now = time.monotonic()
+        prev_text, prev_time = self._recent.get(icao, ("", 0.0))
+        if text == prev_text and now - prev_time < 20.0:
+            return
+        self._recent[icao] = (text, now)
         dur_str = f"({duration:.1f}s) " if duration > 0 else ""
         line = Text()
         line.append(f"[{ts}] {icao} {station_name:<16} {dur_str}│ ", style="bold green")
@@ -383,6 +430,28 @@ class Transcriber:
 
 
 # ---------------------------------------------------------------------------
+# Hallucination filter
+# ---------------------------------------------------------------------------
+
+# Matches any 1–4 char sequence repeated 8+ times (e.g. "9.9.9.9.9.9.9.9.9")
+_REPETITION_RE = re.compile(r'(.{1,4})\1{7,}')
+
+# Short filler phrases Whisper emits on silence/noise
+_WHISPER_FILLERS = frozenset({"you", ".", ""})
+
+
+def _is_hallucination(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if _REPETITION_RE.search(stripped):
+        return True
+    if stripped.rstrip(".").lower() in _WHISPER_FILLERS:
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Keyword helpers
 # ---------------------------------------------------------------------------
 
@@ -392,6 +461,12 @@ def _kw_pattern(kw: str) -> re.Pattern:
 
 def _has_keywords(text: str, keywords: list) -> bool:
     return any(_kw_pattern(kw).search(text) for kw in keywords)
+
+
+def _apply_atc_corrections(text: str) -> str:
+    for pattern, replacement in ATC_CORRECTIONS:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
 
 
 def _highlight_keywords(text: str, keywords: list, enabled: bool) -> Text:
@@ -505,6 +580,8 @@ def _handle_command(text: str, state: SharedState) -> None:
             "/mute all — mute every station\n"
             "/unmute all — unmute every station\n"
             "/keywords on|off — toggle keyword highlighting\n"
+            "/pause — suspend all transcription & forwarding\n"
+            "/resume — restart transcription & forwarding\n"
             "/help — this message"
         )
 
@@ -515,6 +592,8 @@ def _handle_command(text: str, state: SharedState) -> None:
             lines.append(f"{icon} [{i}] {s['icao']} {s['name']}")
         kw = "ON" if state.keywords_enabled else "OFF"
         lines.append(f"\nKeywords: <b>{kw}</b>")
+        paused_str = "⏸ Paused" if state.paused else "▶ Running"
+        lines.append(f"Status: <b>{paused_str}</b>")
         _post_telegram("\n".join(lines))
 
     elif cmd in ("mute", "unmute"):
@@ -554,6 +633,18 @@ def _handle_command(text: str, state: SharedState) -> None:
                 state.display.refresh()
         else:
             _post_telegram("Usage: /keywords on  or  /keywords off")
+
+    elif cmd in ("pause", "resume"):
+        want_paused = cmd == "pause"
+        with state._lock:
+            state.paused = want_paused
+        icon = "⏸" if want_paused else "▶️"
+        label = "paused" if want_paused else "resumed"
+        detail = "transcription & Telegram stopped" if want_paused else "transcription active"
+        _post_telegram(f"{icon} ATC Tracker <b>{label}</b> — {detail}")
+        tui(f"Telegram → {label}", style="bold yellow" if want_paused else "bold green")
+        if state.display:
+            state.display.refresh()
 
     else:
         _post_telegram(f"Unknown command: <code>/{cmd}</code>\nSend /help for a list.")
@@ -604,6 +695,14 @@ def _keyboard_listener(state: SharedState) -> None:
                     if ch.lower() == "k":
                         state.toggle_keywords()
                         if state.display:
+                            state.display.refresh()
+                    elif ch.lower() == "p":
+                        paused = state.toggle_pause()
+                        if state.display:
+                            ts = _now_ts()
+                            msg = "⏸ PAUSED — transcription & Telegram stopped" if paused else "▶ RESUMED — transcription active"
+                            style = "bold yellow" if paused else "bold green"
+                            state.display.log(Text(f"[{ts}] {msg}", style=style))
                             state.display.refresh()
                     elif ch.isdigit() and ch != "0":
                         idx = int(ch) - 1
@@ -670,8 +769,8 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
                     silence_since = None
                     buf.append(chunk)
                     if buf.duration_seconds > MAX_TRANSMISSION_SEC:
-                        audio = buf.flush()
-                        if state.is_enabled(icao):
+                        audio = _preprocessor.process(buf.flush())
+                        if state.is_enabled(icao) and not state.paused:
                             ts = _now_ts()
                             transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts)
                 else:
@@ -681,8 +780,8 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
                         if silence_since is None:
                             silence_since = now
                         elif now - silence_since >= VAD_SILENCE_HANGOVER:
-                            audio = buf.flush()
-                            if state.is_enabled(icao):
+                            audio = _preprocessor.process(buf.flush())
+                            if state.is_enabled(icao) and not state.paused:
                                 ts = _now_ts()
                                 transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts)
                             in_tx = False

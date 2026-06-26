@@ -4,3 +4,4 @@ requests>=2.34.0
 numpy>=2.4.0
 rich>=13.8.0
 python-dotenv>=1.0.0
+scipy>=1.11.0
