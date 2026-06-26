@@ -28,8 +28,7 @@ import mlx_whisper
 import numpy as np
 from scipy.signal import butter, sosfilt
 import requests
-from rich.console import Console
-from rich.layout import Layout
+from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
@@ -111,7 +110,8 @@ class LiveDisplay:
         self._live = Live(
             self._render(),
             console=console,
-            auto_refresh=False,
+            auto_refresh=True,
+            refresh_per_second=10,
             transient=False,
         )
 
@@ -127,7 +127,6 @@ class LiveDisplay:
 
     def _do_refresh(self) -> None:
         self._live.update(self._render())
-        self._live.refresh()
 
     # ── Context manager ─────────────────────────────────────────────────────
 
@@ -172,8 +171,8 @@ class LiveDisplay:
 
         return h
 
-    def _render(self):
-        # Header: 2 border lines + 2 info lines + 2 separators + N station lines + 1 controls line
+    def _render(self) -> Group:
+        # header: 2 border lines + 2 info lines + 2 separators + N station lines + 1 controls line
         header_size = 7 + len(STREAMS)
 
         header_panel = Panel(
@@ -183,7 +182,8 @@ class LiveDisplay:
         )
 
         term_h = self._console.height or 40
-        log_visible = max(3, term_h - header_size - 2)
+        # -4: 2 for log panel borders, 2 for breathing room
+        log_visible = max(3, term_h - header_size - 4)
 
         with self._lock:
             visible = list(self._lines)[-log_visible:]
@@ -203,12 +203,7 @@ class LiveDisplay:
             border_style="dim",
         )
 
-        layout = Layout()
-        layout.split_column(
-            Layout(header_panel, name="header", size=header_size),
-            Layout(log_panel, name="log"),
-        )
-        return layout
+        return Group(header_panel, log_panel)
 
 
 # Module-level display reference used by _post_telegram (set in main).
