@@ -458,14 +458,18 @@ def _telegram_command_listener(state: SharedState, console: Console) -> None:
 # Station status display
 # ---------------------------------------------------------------------------
 
+def _station_row(i: int, s: dict, enabled: bool) -> Text:
+    row = Text()
+    row.append(f"  [{i}] {s['icao']}  {s['name']:<16}  ")
+    row.append("ON   " if enabled else "MUTED", style="green" if enabled else "red")
+    return row
+
+
 def _print_station_status(state: SharedState, console: Console):
-    lines = ["[bold cyan]── Station status ──────────────────────────[/bold cyan]"]
+    console.print("[bold cyan]── Station status ──────────────────────[/bold cyan]")
     for i, s in enumerate(STREAMS, 1):
-        enabled = state.is_enabled(s["icao"])
-        status = "[green]ON   [/green]" if enabled else "[red]MUTED[/red]"
-        lines.append(f"  [{i}] {s['icao']}  {s['name']:<22} {status}")
-    lines.append("[bold cyan]────────────────────────────────────────────[/bold cyan]")
-    console.print("\n".join(lines))
+        console.print(_station_row(i, s, state.is_enabled(s["icao"])))
+    console.print("[bold cyan]────────────────────────────────────────[/bold cyan]")
 
 
 # ---------------------------------------------------------------------------
@@ -486,7 +490,9 @@ def _keyboard_listener(state: SharedState, console: Console):
                     if ch.lower() == "k":
                         enabled = state.toggle_keywords()
                         label = "ON" if enabled else "OFF"
-                        console.print(f"[cyan]── Keywords: {label} ──[/cyan]")
+                        row = Text()
+                        row.append(f"── Keywords: {label} ──", style="cyan")
+                        console.print(row)
                     elif ch.isdigit() and ch != "0":
                         idx = int(ch) - 1
                         if idx < len(STREAMS):
@@ -531,7 +537,10 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState,
             silence_since: Optional[float] = None
 
             ts = _now_ts()
-            console.print(f"[green][{ts}] {icao} {station_name} — connected[/green]")
+            row = Text()
+            row.append(f"[{ts}] {icao} {station_name:<16}  ", style="bold green")
+            row.append("│ Connected", style="green")
+            console.print(row)
 
             for raw_chunk in pcm_gen:
                 if state.stop_event.is_set():
@@ -716,17 +725,16 @@ def main():
     )
 
     console.rule("[bold]ATC Tracker[/bold]")
-    console.print(f"Model   : [cyan]{model}[/cyan]  (downloads ~230 MB on first run)")
-    console.print(f"Keywords: [cyan]{'OFF' if args.no_keywords else 'ON'}[/cyan]  (press K to toggle)")
+    console.print(f"Model   : [cyan]{model}[/cyan]")
+    kw_label = "OFF" if args.no_keywords else "ON"
+    console.print(f"Keywords: [cyan]{kw_label}[/cyan]  (press K to toggle)")
     console.print(f"Telegram: {tg_status}")
     console.print("")
     console.print("Stations — press number to mute/unmute:")
     for i, s in enumerate(STREAMS, 1):
-        enabled = state.is_enabled(s["icao"])
-        status = "[green]ON [/green]" if enabled else "[red]OFF[/red]"
-        console.print(f"  [{i}] {s['icao']} {s['name']:<20} {status}")
+        console.print(_station_row(i, s, state.is_enabled(s["icao"])))
     console.print("")
-    console.print("  [K] toggle keywords   [Q] quit")
+    console.print("  [[K]] toggle keywords   [[Q]] quit")
     console.rule()
 
     kb_thread = threading.Thread(
