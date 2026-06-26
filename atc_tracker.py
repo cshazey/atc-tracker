@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ATC Tracker — YBCG Brisbane Centre live speech-to-text transcription.
+ATC Tracker — multi-station live speech-to-text transcription.
 Streams MP3 audio from LiveATC.net, detects transmissions via VAD,
 transcribes with Whisper, highlights configurable keywords, and forwards
 every transmission to Telegram when credentials are configured.
@@ -14,7 +14,6 @@ import argparse
 import collections
 import html
 import queue
-import sys
 import threading
 import time
 from datetime import datetime
@@ -32,8 +31,7 @@ from config import (
     KEYWORDS,
     MAX_TRANSMISSION_SEC,
     RECONNECT_DELAY_SEC,
-    STREAM_HEADERS,
-    STREAM_URL,
+    STREAMS,
     VAD_CHUNK_FRAMES,
     VAD_RMS_THRESHOLD,
     VAD_SAMPLE_RATE,
@@ -88,7 +86,6 @@ class LiveATCSource(miniaudio.StreamableSource):
                     with self._cond:
                         self._deque.append(chunk)
                         self._deque_bytes += len(chunk)
-                        # Drop oldest data if we're falling behind
                         while self._deque_bytes > self._BUFFER_MAX and self._deque:
                             dropped = self._deque.popleft()
                             self._deque_bytes -= len(dropped)
@@ -136,8 +133,7 @@ class VoiceActivityDetector:
         self.threshold = threshold
 
     def is_speech(self, chunk: np.ndarray) -> bool:
-        rms = float(np.sqrt(np.mean(chunk ** 2)))
-        return rms > self.threshold
+        return float(np.sqrt(np.mean(chunk ** 2))) > self.threshold
 
 
 # ---------------------------------------------------------------------------
@@ -173,31 +169,33 @@ class TransmissionBuffer:
 # ---------------------------------------------------------------------------
 
 class Transcriber:
-    _MIN_DURATION = 0.5  # discard buffers shorter than this to avoid hallucination
+    _MIN_DURATION = 0.5
 
     def __init__(self, model: str, state: SharedState, console: Console):
         self._model = model
         self._state = state
         self._console = console
-        self._queue: queue.Queue = queue.Queue(maxsize=1)
+        # Queue holds (audio, icao, station_name, ts) tuples; None = shutdown sentinel
+        self._queue: queue.Queue = queue.Queue(maxsize=4)
         self._thread = threading.Thread(target=self._worker, daemon=True, name="transcriber")
         self._thread.start()
 
-    def submit(self, audio: np.ndarray, duration: float) -> bool:
+    def submit(self, audio: np.ndarray, duration: float, icao: str, station_name: str, ts: str) -> bool:
         if duration < self._MIN_DURATION:
             return False
         try:
-            self._queue.put_nowait(audio)
+            self._queue.put_nowait((audio, icao, station_name, ts))
             return True
         except queue.Full:
-            self._console.print("[yellow]⚠ Transcriber busy — dropping short TX[/yellow]")
+            self._console.print(f"[yellow]⚠ [{icao}] Transcriber busy — dropping TX[/yellow]")
             return False
 
     def _worker(self):
         while True:
-            audio = self._queue.get()
-            if audio is None:
+            item = self._queue.get()
+            if item is None:
                 break
+            audio, icao, station_name, ts = item
             try:
                 result = mlx_whisper.transcribe(
                     audio,
@@ -209,18 +207,17 @@ class Transcriber:
                 )
                 text = (result.get("text") or "").strip()
                 if text:
-                    self._log(text)
+                    self._log(text, icao, station_name, ts)
             except Exception as exc:
-                self._console.print(f"[red]Transcription error: {exc}[/red]")
+                self._console.print(f"[red]Transcription error [{icao}]: {exc}[/red]")
             finally:
                 self._queue.task_done()
 
-    def _log(self, text: str):
-        ts = datetime.now().strftime("%H:%M:%S")
-        prefix = Text(f"[{ts}] TX  ", style="bold green")
+    def _log(self, text: str, icao: str, station_name: str, ts: str):
+        prefix = Text(f"[{ts}] {icao} {station_name:<18} │ ", style="bold green")
         content = _highlight_keywords(text, KEYWORDS, enabled=self._state.keywords_enabled)
         self._console.print(Text.assemble(prefix, content))
-        _send_telegram(text, ts, _has_keywords(text, KEYWORDS))
+        _send_telegram(text, ts, icao, station_name, _has_keywords(text, KEYWORDS))
 
     def shutdown(self):
         self._queue.put(None)
@@ -228,15 +225,19 @@ class Transcriber:
 
 
 # ---------------------------------------------------------------------------
-# Keyword highlighting
+# Keyword helpers
 # ---------------------------------------------------------------------------
+
+def _has_keywords(text: str, keywords: list) -> bool:
+    lower = text.lower()
+    return any(kw.lower() in lower for kw in keywords)
+
 
 def _highlight_keywords(text: str, keywords: list, enabled: bool) -> Text:
     if not enabled:
         return Text(text)
 
     lower = text.lower()
-    # Collect all match spans
     spans: list = []
     for kw in keywords:
         kw_lower = kw.lower()
@@ -251,7 +252,6 @@ def _highlight_keywords(text: str, keywords: list, enabled: bool) -> Text:
     if not spans:
         return Text(text)
 
-    # Sort and merge overlapping spans
     spans.sort()
     merged: list = []
     for s, e in spans:
@@ -273,27 +273,17 @@ def _highlight_keywords(text: str, keywords: list, enabled: bool) -> Text:
 
 
 # ---------------------------------------------------------------------------
-# Keyword detection helper
-# ---------------------------------------------------------------------------
-
-def _has_keywords(text: str, keywords: list) -> bool:
-    lower = text.lower()
-    return any(kw.lower() in lower for kw in keywords)
-
-
-# ---------------------------------------------------------------------------
 # Telegram sender
 # ---------------------------------------------------------------------------
 
-def _send_telegram(text: str, ts: str, has_keywords: bool) -> None:
+def _send_telegram(text: str, ts: str, icao: str, station_name: str, has_keywords: bool) -> None:
     if not config.TELEGRAM_ENABLED:
         return
-    emoji = "🔴" if has_keywords else "📻"
-    header = (
-        f"{emoji} <b>[KEYWORD ALERT]</b> YBCG Brisbane Centre"
-        if has_keywords
-        else f"{emoji} YBCG Brisbane Centre"
-    )
+    label = f"{icao} {station_name}"
+    if has_keywords:
+        header = f"🔴 <b>[KEYWORD ALERT]</b> {label}"
+    else:
+        header = f"📻 {label}"
     message = f"{header}\n<code>[{ts}]</code> {html.escape(text)}"
     try:
         requests.post(
@@ -306,7 +296,7 @@ def _send_telegram(text: str, ts: str, has_keywords: bool) -> None:
             timeout=10,
         )
     except Exception:
-        pass  # never crash the tracker because of a Telegram hiccup
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -334,19 +324,24 @@ def _keyboard_listener(state: SharedState, console: Console):
             finally:
                 termios.tcsetattr(tty_fh, termios.TCSADRAIN, old)
     except Exception:
-        pass  # keyboard listener is optional
+        pass
 
 
 # ---------------------------------------------------------------------------
-# Main stream loop
+# Per-station stream loop (runs in its own thread)
 # ---------------------------------------------------------------------------
 
-def _stream_loop(transcriber: Transcriber, state: SharedState, console: Console):
+def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState, console: Console):
+    icao = stream_cfg["icao"]
+    station_name = stream_cfg["name"]
+    url = stream_cfg["url"]
+    headers = stream_cfg["headers"]
+
     while not state.stop_event.is_set():
         source: Optional[LiveATCSource] = None
         try:
-            console.print("[dim]Connecting to stream...[/dim]")
-            source = LiveATCSource(STREAM_URL, STREAM_HEADERS)
+            console.print(f"[dim]Connecting to {icao} {station_name}...[/dim]")
+            source = LiveATCSource(url, headers)
 
             pcm_gen = miniaudio.stream_any(
                 source,
@@ -363,11 +358,7 @@ def _stream_loop(transcriber: Transcriber, state: SharedState, console: Console)
             silence_since: Optional[float] = None
 
             ts = datetime.now().strftime("%H:%M:%S")
-            kw_label = "ON" if state.keywords_enabled else "OFF"
-            console.print(
-                f"[green][{ts}] Connected — YBCG Brisbane Centre | "
-                f"Keywords: {kw_label} | Press K to toggle, Q to quit[/green]"
-            )
+            console.print(f"[green][{ts}] {icao} {station_name} — connected[/green]")
 
             for raw_chunk in pcm_gen:
                 if state.stop_event.is_set():
@@ -379,10 +370,10 @@ def _stream_loop(transcriber: Transcriber, state: SharedState, console: Console)
                     in_tx = True
                     silence_since = None
                     buf.append(chunk)
-                    # Safety cap: flush mid-transmission if too long
                     if buf.duration_seconds > MAX_TRANSMISSION_SEC:
+                        ts = datetime.now().strftime("%H:%M:%S")
                         audio = buf.flush()
-                        transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE)
+                        transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts)
                 else:
                     if in_tx:
                         buf.append(chunk)
@@ -390,18 +381,16 @@ def _stream_loop(transcriber: Transcriber, state: SharedState, console: Console)
                         if silence_since is None:
                             silence_since = now
                         elif now - silence_since >= VAD_SILENCE_HANGOVER:
+                            ts = datetime.now().strftime("%H:%M:%S")
                             audio = buf.flush()
-                            transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE)
+                            transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts)
                             in_tx = False
                             silence_since = None
 
-        except KeyboardInterrupt:
-            state.stop_event.set()
-            break
         except Exception as exc:
             if not state.stop_event.is_set():
-                console.print(f"[red]Stream error: {exc}[/red]")
-                console.print(f"[dim]Reconnecting in {RECONNECT_DELAY_SEC}s...[/dim]")
+                console.print(f"[red]{icao} stream error: {exc}[/red]")
+                console.print(f"[dim]Reconnecting {icao} in {RECONNECT_DELAY_SEC}s...[/dim]")
                 time.sleep(RECONNECT_DELAY_SEC)
         finally:
             if source:
@@ -412,13 +401,13 @@ def _stream_loop(transcriber: Transcriber, state: SharedState, console: Console)
 # Calibrate mode
 # ---------------------------------------------------------------------------
 
-def _calibrate(console: Console):
+def _calibrate(console: Console, stream_cfg: dict):
+    icao = stream_cfg["icao"]
     console.print(
-        "[cyan]Calibrate mode — printing live RMS for 15 seconds.\n"
-        "Silence should be near 0.000; transmissions should spike above 0.003.\n"
-        "Ctrl+C to stop early.[/cyan]"
+        f"[cyan]Calibrate mode — {icao} {stream_cfg['name']} — printing live RMS for 15s.\n"
+        "Silence ≈ 0.000; transmissions spike above 0.003. Ctrl+C to stop.[/cyan]"
     )
-    source = LiveATCSource(STREAM_URL, STREAM_HEADERS)
+    source = LiveATCSource(stream_cfg["url"], stream_cfg["headers"])
     pcm_gen = miniaudio.stream_any(
         source,
         source_format=miniaudio.FileFormat.MP3,
@@ -449,7 +438,7 @@ def _calibrate(console: Console):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="ATC Tracker — YBCG Brisbane Centre live transcription"
+        description="ATC Tracker — multi-station live speech-to-text transcription"
     )
     parser.add_argument(
         "--model",
@@ -464,15 +453,21 @@ def main():
     )
     parser.add_argument(
         "--calibrate",
-        action="store_true",
-        help="Print live RMS values for 15s to calibrate VAD threshold",
+        default=None,
+        metavar="ICAO",
+        help="Calibrate VAD for a station, e.g. --calibrate YBCG",
     )
     args = parser.parse_args()
 
     console = Console()
 
     if args.calibrate:
-        _calibrate(console)
+        icao = args.calibrate.upper()
+        matches = [s for s in STREAMS if s["icao"] == icao]
+        if not matches:
+            console.print(f"[red]Unknown ICAO '{icao}'. Available: {[s['icao'] for s in STREAMS]}[/red]")
+            return
+        _calibrate(console, matches[0])
         return
 
     model = args.model or WHISPER_MODEL
@@ -482,9 +477,10 @@ def main():
         if config.TELEGRAM_ENABLED
         else "[yellow]OFF[/yellow]  (set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID to enable)"
     )
+    stream_labels = "  |  ".join(f"{s['icao']} {s['name']}" for s in STREAMS)
+
     console.rule("[bold]ATC Tracker[/bold]")
-    console.print(f"Station : [cyan]YBCG Brisbane Centre (Gold Coast)[/cyan]")
-    console.print(f"Stream  : [dim]{STREAM_URL}[/dim]")
+    console.print(f"Stations: [cyan]{stream_labels}[/cyan]")
     console.print(f"Model   : [cyan]{model}[/cyan]  (downloads ~230 MB on first run)")
     console.print(f"Keywords: [cyan]{'OFF' if args.no_keywords else 'ON'}[/cyan]  (press K to toggle)")
     console.print(f"Telegram: {tg_status}")
@@ -499,8 +495,19 @@ def main():
 
     transcriber = Transcriber(model, state, console)
 
+    stream_threads = []
+    for stream_cfg in STREAMS:
+        t = threading.Thread(
+            target=_stream_loop,
+            args=(stream_cfg, transcriber, state, console),
+            daemon=True,
+            name=f"stream-{stream_cfg['icao']}",
+        )
+        t.start()
+        stream_threads.append(t)
+
     try:
-        _stream_loop(transcriber, state, console)
+        state.stop_event.wait()
     except KeyboardInterrupt:
         state.stop_event.set()
     finally:

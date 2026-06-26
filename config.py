@@ -1,8 +1,6 @@
 import os
 
-STREAM_URL = "https://s1-bos.liveatc.net/ybcg3_centre"
-
-STREAM_HEADERS = {
+_HEADERS = {
     "accept": "*/*",
     "accept-language": "en-GB,en;q=0.9",
     "cache-control": "no-cache",
@@ -19,6 +17,22 @@ STREAM_HEADERS = {
     "sec-gpc": "1",
     "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
 }
+
+# Each entry is one monitored ATC feed.
+STREAMS = [
+    {
+        "icao": "YBCG",
+        "name": "Brisbane Centre",
+        "url": "https://s1-bos.liveatc.net/ybcg3_centre",
+        "headers": _HEADERS,
+    },
+    {
+        "icao": "YSPT",
+        "name": "Southport",
+        "url": "https://s1-bos.liveatc.net/yspt2",
+        "headers": _HEADERS,
+    },
+]
 
 WHISPER_MODEL = "mlx-community/whisper-small.en"
 
