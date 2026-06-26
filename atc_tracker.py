@@ -28,6 +28,9 @@ import mlx_whisper
 import numpy as np
 import requests
 from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
 from rich.text import Text
 
 import config
@@ -47,14 +50,9 @@ _AEST = ZoneInfo("Australia/Brisbane")
 
 
 def _now_ts() -> str:
-    """Return a combined AEST + Zulu timestamp string."""
     utc = datetime.now(timezone.utc)
     aest = utc.astimezone(_AEST)
     return f"{aest.strftime('%H:%M:%S')} AEST / {utc.strftime('%H:%M:%S')}Z"
-
-
-# Module-level console — set in main() so all helpers can use it for warnings.
-_console_singleton: Console = Console()
 
 
 # ---------------------------------------------------------------------------
@@ -66,8 +64,8 @@ class SharedState:
         self.keywords_enabled = keywords_enabled
         self.stop_event = threading.Event()
         self._lock = threading.Lock()
-        # icao -> bool; all enabled by default, populated by main()
         self.station_enabled: dict = {}
+        self.display: Optional["LiveDisplay"] = None
 
     def toggle_keywords(self) -> bool:
         with self._lock:
@@ -81,6 +79,127 @@ class SharedState:
 
     def is_enabled(self, icao: str) -> bool:
         return self.station_enabled.get(icao, True)
+
+
+# ---------------------------------------------------------------------------
+# Live terminal UI
+# ---------------------------------------------------------------------------
+
+class LiveDisplay:
+    """Thread-safe live UI: fixed status header + scrolling transmission log.
+
+    All threads call .log(Text) or .refresh(). Rich's Live handles rendering
+    on the main thread so output never interleaves.
+    """
+
+    def __init__(self, model: str, state: SharedState, console: Console):
+        self._model = model
+        self._state = state
+        self._console = console
+        self._lines: collections.deque = collections.deque(maxlen=500)
+        self._lock = threading.Lock()
+        self._live = Live(
+            self._render(),
+            console=console,
+            auto_refresh=False,
+            transient=False,
+        )
+
+    # ── Public API (thread-safe) ────────────────────────────────────────────
+
+    def log(self, line: Text) -> None:
+        with self._lock:
+            self._lines.append(line)
+        self._do_refresh()
+
+    def refresh(self) -> None:
+        self._do_refresh()
+
+    def _do_refresh(self) -> None:
+        self._live.update(self._render())
+        self._live.refresh()
+
+    # ── Context manager ─────────────────────────────────────────────────────
+
+    def __enter__(self):
+        self._live.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        self._live.__exit__(*args)
+
+    # ── Rendering ───────────────────────────────────────────────────────────
+
+    def _build_header(self) -> Text:
+        h = Text()
+
+        h.append("  Model   : ", style="dim")
+        h.append(self._model + "\n", style="cyan")
+
+        h.append("  Keywords: ", style="dim")
+        kw = self._state.keywords_enabled
+        h.append("ON   " if kw else "OFF  ", style="green" if kw else "yellow")
+        h.append("  Telegram: ", style="dim")
+        if config.TELEGRAM_ENABLED:
+            h.append("ON", style="green")
+            h.append(f"  →  {config.TELEGRAM_CHAT_ID}  (/help for commands)\n", style="dim")
+        else:
+            h.append("OFF\n", style="yellow")
+
+        h.append("  " + "─" * 50 + "\n", style="dim cyan")
+
+        for i, s in enumerate(STREAMS, 1):
+            enabled = self._state.is_enabled(s["icao"])
+            h.append(f"  [{i}] {s['icao']}  {s['name']:<16}  ")
+            h.append("ON   \n" if enabled else "MUTED\n",
+                     style="green" if enabled else "red")
+
+        h.append("  " + "─" * 50 + "\n", style="dim cyan")
+        h.append("  [K] keywords   [Q] quit", style="dim")
+
+        return h
+
+    def _render(self):
+        # Header: 2 border lines + 2 info lines + 2 separators + N station lines + 1 controls line
+        header_size = 7 + len(STREAMS)
+
+        header_panel = Panel(
+            self._build_header(),
+            title="[bold cyan]ATC Tracker[/bold cyan]",
+            border_style="cyan",
+        )
+
+        term_h = self._console.height or 40
+        log_visible = max(3, term_h - header_size - 2)
+
+        with self._lock:
+            visible = list(self._lines)[-log_visible:]
+
+        if visible:
+            log_text = Text()
+            for i, line in enumerate(visible):
+                log_text.append_text(line)
+                if i < len(visible) - 1:
+                    log_text.append("\n")
+        else:
+            log_text = Text("  waiting for transmissions...", style="dim")
+
+        log_panel = Panel(
+            log_text,
+            title="[dim]Transmissions[/dim]",
+            border_style="dim",
+        )
+
+        layout = Layout()
+        layout.split_column(
+            Layout(header_panel, name="header", size=header_size),
+            Layout(log_panel, name="log"),
+        )
+        return layout
+
+
+# Module-level display reference used by _post_telegram (set in main).
+_display_ref: Optional[LiveDisplay] = None
 
 
 # ---------------------------------------------------------------------------
@@ -192,10 +311,9 @@ class TransmissionBuffer:
 class Transcriber:
     _MIN_DURATION = 0.5
 
-    def __init__(self, model: str, state: SharedState, console: Console, log_file: Optional[Path] = None):
+    def __init__(self, model: str, state: SharedState, log_file: Optional[Path] = None):
         self._model = model
         self._state = state
-        self._console = console
         self._log_file = log_file
         self._queue: queue.Queue = queue.Queue(maxsize=8)
         self._thread = threading.Thread(target=self._worker, daemon=True, name="transcriber")
@@ -208,8 +326,12 @@ class Transcriber:
             self._queue.put_nowait((audio, duration, icao, station_name, ts))
             return True
         except queue.Full:
-            self._console.print(f"[yellow]⚠ [{icao}] Transcriber busy — dropping TX[/yellow]")
+            self._tui_log(Text(f"⚠ [{icao}] Transcriber busy — dropping TX", style="yellow"))
             return False
+
+    def _tui_log(self, line: Text) -> None:
+        if self._state.display:
+            self._state.display.log(line)
 
     def _worker(self):
         while True:
@@ -232,22 +354,21 @@ class Transcriber:
             except Exception as exc:
                 msg = str(exc)
                 if "401" in msg or "authentication" in msg.lower() or "username or password" in msg.lower():
-                    self._console.print(
-                        "[red]HuggingFace authentication required to download the Whisper model.\n"
-                        "  1. Sign up free at https://huggingface.co\n"
-                        "  2. Create a token at https://huggingface.co/settings/tokens\n"
-                        "  3. Add HUGGINGFACE_TOKEN=your_token to your .env file and restart.[/red]"
-                    )
+                    self._tui_log(Text(
+                        "⚠ HuggingFace auth failed — check HUGGINGFACE_TOKEN in .env",
+                        style="red",
+                    ))
                 else:
-                    self._console.print(f"[red]Transcription error [{icao}]: {exc}[/red]")
+                    self._tui_log(Text(f"⚠ Transcription error [{icao}]: {exc}", style="red"))
             finally:
                 self._queue.task_done()
 
     def _log(self, text: str, icao: str, station_name: str, ts: str, duration: float = 0.0):
         dur_str = f"({duration:.1f}s) " if duration > 0 else ""
-        prefix = Text(f"[{ts}] {icao} {station_name:<18} {dur_str}│ ", style="bold green")
-        content = _highlight_keywords(text, KEYWORDS, enabled=self._state.keywords_enabled)
-        self._console.print(Text.assemble(prefix, content))
+        line = Text()
+        line.append(f"[{ts}] {icao} {station_name:<16} {dur_str}│ ", style="bold green")
+        line.append_text(_highlight_keywords(text, KEYWORDS, enabled=self._state.keywords_enabled))
+        self._tui_log(line)
         _send_telegram(text, ts, icao, station_name, _has_keywords(text, KEYWORDS))
         if self._log_file:
             try:
@@ -266,7 +387,7 @@ class Transcriber:
 # ---------------------------------------------------------------------------
 
 def _kw_pattern(kw: str) -> re.Pattern:
-    return re.compile(r'\b' + re.escape(kw) + r'\b', re.IGNORECASE)
+    return re.compile(r"\b" + re.escape(kw) + r"\b", re.IGNORECASE)
 
 
 def _has_keywords(text: str, keywords: list) -> bool:
@@ -310,7 +431,6 @@ def _highlight_keywords(text: str, keywords: list, enabled: bool) -> Text:
 # ---------------------------------------------------------------------------
 
 def _post_telegram(message: str) -> None:
-    """Low-level send — all Telegram calls go through here."""
     if not config.TELEGRAM_ENABLED:
         return
     try:
@@ -324,25 +444,26 @@ def _post_telegram(message: str) -> None:
             timeout=10,
         )
     except Exception as exc:
-        _console_singleton.print(f"[dim yellow]⚠ Telegram send failed: {exc}[/dim yellow]")
+        if _display_ref is not None:
+            _display_ref.log(Text(f"⚠ Telegram send failed: {exc}", style="dim yellow"))
 
 
 def _send_telegram(text: str, ts: str, icao: str, station_name: str, has_keywords: bool) -> None:
     label = f"{icao} {station_name}"
     header = (
-        f"🔴 <b>[KEYWORD ALERT]</b> {label}"
+        f"\U0001f534 <b>[KEYWORD ALERT]</b> {label}"
         if has_keywords
-        else f"📻 {label}"
+        else f"\U0001f4fb {label}"
     )
     _post_telegram(f"{header}\n<code>[{ts}]</code> {html.escape(text)}")
 
 
 def _send_startup_notification(state: SharedState) -> None:
     ts = _now_ts()
-    lines = [f"🟢 <b>ATC Tracker started</b>  <code>[{ts}]</code>", ""]
+    lines = [f"\U0001f7e2 <b>ATC Tracker started</b>  <code>[{ts}]</code>", ""]
     for s in STREAMS:
         enabled = state.is_enabled(s["icao"])
-        icon = "✅" if enabled else "🔇"
+        icon = "✅" if enabled else "\U0001f507"
         lines.append(f"{icon} {s['icao']} {s['name']}")
     _post_telegram("\n".join(lines))
 
@@ -352,7 +473,6 @@ def _send_startup_notification(state: SharedState) -> None:
 # ---------------------------------------------------------------------------
 
 def _resolve_station(arg: str) -> Optional[dict]:
-    """Resolve a station argument (number 1-N or ICAO string) to a STREAMS entry."""
     arg = arg.strip().upper()
     if arg.isdigit():
         idx = int(arg) - 1
@@ -365,16 +485,20 @@ def _resolve_station(arg: str) -> Optional[dict]:
     return None
 
 
-def _handle_command(text: str, state: SharedState, console: Console) -> None:
+def _handle_command(text: str, state: SharedState) -> None:
     if not text.startswith("/"):
         return
     parts = text.split(None, 2)
     cmd = parts[0].lower().lstrip("/")
     arg = parts[1].lower() if len(parts) > 1 else ""
 
+    def tui(msg: str, style: str = "dim cyan") -> None:
+        if state.display:
+            state.display.log(Text(msg, style=style))
+
     if cmd == "help":
         _post_telegram(
-            "📡 <b>ATC Tracker commands</b>\n\n"
+            "\U0001f4e1 <b>ATC Tracker commands</b>\n\n"
             "/status — show all station states\n"
             "/mute 1  or  /mute YBCG — mute a station\n"
             "/unmute 1  or  /unmute YBCG — unmute a station\n"
@@ -385,9 +509,9 @@ def _handle_command(text: str, state: SharedState, console: Console) -> None:
         )
 
     elif cmd == "status":
-        lines = ["📡 <b>Station status</b>"]
+        lines = ["\U0001f4e1 <b>Station status</b>"]
         for i, s in enumerate(STREAMS, 1):
-            icon = "✅" if state.is_enabled(s["icao"]) else "🔇"
+            icon = "✅" if state.is_enabled(s["icao"]) else "\U0001f507"
             lines.append(f"{icon} [{i}] {s['icao']} {s['name']}")
         kw = "ON" if state.keywords_enabled else "OFF"
         lines.append(f"\nKeywords: <b>{kw}</b>")
@@ -395,32 +519,39 @@ def _handle_command(text: str, state: SharedState, console: Console) -> None:
 
     elif cmd in ("mute", "unmute"):
         want_enabled = cmd == "unmute"
+        label = "active" if want_enabled else "muted"
+        icon = "✅" if want_enabled else "\U0001f507"
         if arg == "all":
             for s in STREAMS:
                 state.station_enabled[s["icao"]] = want_enabled
-            icon = "✅" if want_enabled else "🔇"
-            label = "active" if want_enabled else "muted"
             _post_telegram(f"{icon} All stations {label}")
-            console.print(f"[cyan]── Telegram: all stations {label} ──[/cyan]")
+            tui(f"Telegram → all stations {label}")
+            if state.display:
+                state.display.refresh()
         else:
             station = _resolve_station(arg)
             if station is None:
-                _post_telegram(f"⚠ Unknown station: <code>{arg}</code>\nUse a number (1–{len(STREAMS)}) or ICAO code.")
+                _post_telegram(
+                    f"⚠ Unknown station: <code>{arg}</code>\n"
+                    f"Use a number (1–{len(STREAMS)}) or ICAO code."
+                )
                 return
             state.station_enabled[station["icao"]] = want_enabled
-            icon = "✅" if want_enabled else "🔇"
-            label = "active" if want_enabled else "muted"
             _post_telegram(f"{icon} {station['icao']} {station['name']} — {label}")
-            console.print(f"[cyan]── Telegram: {station['icao']} {label} ──[/cyan]")
+            tui(f"Telegram → {station['icao']} {label}")
+            if state.display:
+                state.display.refresh()
 
     elif cmd == "keywords":
         if arg in ("on", "off"):
             want = arg == "on"
             with state._lock:
                 state.keywords_enabled = want
-            label = "ON" if want else "OFF"
-            _post_telegram(f"🔍 Keywords: <b>{label}</b>")
-            console.print(f"[cyan]── Telegram: Keywords {label} ──[/cyan]")
+            kw_label = "ON" if want else "OFF"
+            _post_telegram(f"\U0001f50d Keywords: <b>{kw_label}</b>")
+            tui(f"Telegram → Keywords {kw_label}")
+            if state.display:
+                state.display.refresh()
         else:
             _post_telegram("Usage: /keywords on  or  /keywords off")
 
@@ -428,7 +559,7 @@ def _handle_command(text: str, state: SharedState, console: Console) -> None:
         _post_telegram(f"Unknown command: <code>/{cmd}</code>\nSend /help for a list.")
 
 
-def _telegram_command_listener(state: SharedState, console: Console) -> None:
+def _telegram_command_listener(state: SharedState) -> None:
     offset = 0
     base = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}"
 
@@ -447,36 +578,19 @@ def _telegram_command_listener(state: SharedState, console: Console) -> None:
                 if chat_id != str(config.TELEGRAM_CHAT_ID):
                     continue
                 text = (msg.get("text") or "").strip()
-                _handle_command(text, state, console)
+                _handle_command(text, state)
         except Exception as exc:
             if not state.stop_event.is_set():
-                console.print(f"[dim yellow]⚠ Telegram poll error: {exc}[/dim yellow]")
+                if state.display:
+                    state.display.log(Text(f"⚠ Telegram poll error: {exc}", style="dim yellow"))
                 time.sleep(RECONNECT_DELAY_SEC)
-
-
-# ---------------------------------------------------------------------------
-# Station status display
-# ---------------------------------------------------------------------------
-
-def _station_row(i: int, s: dict, enabled: bool) -> Text:
-    row = Text()
-    row.append(f"  [{i}] {s['icao']}  {s['name']:<16}  ")
-    row.append("ON   " if enabled else "MUTED", style="green" if enabled else "red")
-    return row
-
-
-def _print_station_status(state: SharedState, console: Console):
-    console.print("[bold cyan]── Station status ──────────────────────[/bold cyan]")
-    for i, s in enumerate(STREAMS, 1):
-        console.print(_station_row(i, s, state.is_enabled(s["icao"])))
-    console.print("[bold cyan]────────────────────────────────────────[/bold cyan]")
 
 
 # ---------------------------------------------------------------------------
 # Keyboard listener
 # ---------------------------------------------------------------------------
 
-def _keyboard_listener(state: SharedState, console: Console):
+def _keyboard_listener(state: SharedState) -> None:
     try:
         import termios
         import tty as tty_mod
@@ -488,16 +602,15 @@ def _keyboard_listener(state: SharedState, console: Console):
                 while not state.stop_event.is_set():
                     ch = tty_fh.read(1)
                     if ch.lower() == "k":
-                        enabled = state.toggle_keywords()
-                        label = "ON" if enabled else "OFF"
-                        row = Text()
-                        row.append(f"── Keywords: {label} ──", style="cyan")
-                        console.print(row)
+                        state.toggle_keywords()
+                        if state.display:
+                            state.display.refresh()
                     elif ch.isdigit() and ch != "0":
                         idx = int(ch) - 1
                         if idx < len(STREAMS):
                             state.toggle_station(STREAMS[idx]["icao"])
-                            _print_station_status(state, console)
+                            if state.display:
+                                state.display.refresh()
                     elif ch in ("\x03", "\x04", "q", "Q"):
                         state.stop_event.set()
                         break
@@ -511,11 +624,15 @@ def _keyboard_listener(state: SharedState, console: Console):
 # Per-station stream loop (runs in its own thread)
 # ---------------------------------------------------------------------------
 
-def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState, console: Console):
+def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState) -> None:
     icao = stream_cfg["icao"]
     station_name = stream_cfg["name"]
     url = stream_cfg["url"]
     headers = stream_cfg["headers"]
+
+    def tui_log(line: Text) -> None:
+        if state.display:
+            state.display.log(line)
 
     while not state.stop_event.is_set():
         source: Optional[LiveATCSource] = None
@@ -537,10 +654,10 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState,
             silence_since: Optional[float] = None
 
             ts = _now_ts()
-            row = Text()
-            row.append(f"[{ts}] {icao} {station_name:<16}  ", style="bold green")
-            row.append("│ Connected", style="green")
-            console.print(row)
+            line = Text()
+            line.append(f"[{ts}] {icao} {station_name:<16}  ", style="bold green")
+            line.append("│ Connected", style="green")
+            tui_log(line)
 
             for raw_chunk in pcm_gen:
                 if state.stop_event.is_set():
@@ -573,8 +690,8 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState,
 
         except Exception as exc:
             if not state.stop_event.is_set():
-                console.print(f"[red]{icao} stream error: {exc}[/red]")
-                console.print(f"[dim]Reconnecting {icao} in {RECONNECT_DELAY_SEC}s...[/dim]")
+                tui_log(Text(f"⚠ {icao}: {exc}", style="red"))
+                tui_log(Text(f"  Reconnecting in {RECONNECT_DELAY_SEC}s…", style="dim"))
                 time.sleep(RECONNECT_DELAY_SEC)
         finally:
             if source:
@@ -585,8 +702,7 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState,
 # Model download check
 # ---------------------------------------------------------------------------
 
-def _ensure_model(model: str, console: Console):
-    """Check whether the model is cached; download it with visible feedback if not."""
+def _ensure_model(model: str, console: Console) -> None:
     from huggingface_hub import snapshot_download
     from huggingface_hub.utils import disable_progress_bars, enable_progress_bars
 
@@ -595,11 +711,9 @@ def _ensure_model(model: str, console: Console):
         snapshot_download(repo_id=model, local_files_only=True)
         console.print("[green]✓ Model already cached — ready[/green]")
     except Exception:
-        console.print(
-            f"[yellow]Downloading {model} (~480 MB) — please wait...[/yellow]"
-        )
+        console.print(f"[yellow]Downloading {model} (∼480 MB) — please wait…[/yellow]")
         try:
-            disable_progress_bars()  # suppress tqdm bars that corrupt Rich output
+            disable_progress_bars()
             snapshot_download(repo_id=model)
             enable_progress_bars()
             console.print("[green]✓ Model downloaded successfully[/green]")
@@ -615,7 +729,7 @@ def _ensure_model(model: str, console: Console):
 # Calibrate mode
 # ---------------------------------------------------------------------------
 
-def _calibrate(console: Console, stream_cfg: dict):
+def _calibrate(console: Console, stream_cfg: dict) -> None:
     icao = stream_cfg["icao"]
     console.print(
         f"[cyan]Calibrate — {icao} {stream_cfg['name']} — printing live RMS for 15s.\n"
@@ -650,38 +764,21 @@ def _calibrate(console: Console, stream_cfg: dict):
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="ATC Tracker — multi-station live speech-to-text transcription"
     )
-    parser.add_argument(
-        "--model",
-        default=None,
-        metavar="REPO",
-        help="Whisper model repo (default: mlx-community/whisper-small.en)",
-    )
-    parser.add_argument(
-        "--no-keywords",
-        action="store_true",
-        help="Start with keyword highlighting disabled",
-    )
-    parser.add_argument(
-        "--stations",
-        nargs="+",
-        metavar="ICAO",
-        help="Start only these stations, e.g. --stations YBCG YSPT",
-    )
-    parser.add_argument(
-        "--calibrate",
-        default=None,
-        metavar="ICAO",
-        help="Calibrate VAD for a station, e.g. --calibrate YBCG",
-    )
+    parser.add_argument("--model", default=None, metavar="REPO",
+                        help="Whisper model repo")
+    parser.add_argument("--no-keywords", action="store_true",
+                        help="Start with keyword highlighting disabled")
+    parser.add_argument("--stations", nargs="+", metavar="ICAO",
+                        help="Start only these stations, e.g. --stations YBCG YSPT")
+    parser.add_argument("--calibrate", default=None, metavar="ICAO",
+                        help="Calibrate VAD for a station, e.g. --calibrate YBCG")
     args = parser.parse_args()
 
-    global _console_singleton
     console = Console()
-    _console_singleton = console
 
     if args.calibrate:
         icao = args.calibrate.upper()
@@ -696,14 +793,13 @@ def main():
 
     state = SharedState(keywords_enabled=not args.no_keywords)
 
-    # Initialise per-station enabled flags
     requested = {s.upper() for s in args.stations} if args.stations else None
     for s in STREAMS:
         state.station_enabled[s["icao"]] = (
             True if requested is None else s["icao"] in requested
         )
 
-    # HuggingFace login — needed to download Whisper models
+    # Pre-display setup (output via console.print is fine here — Live not started yet)
     if config.HUGGINGFACE_TOKEN:
         try:
             from huggingface_hub import login as hf_login
@@ -718,65 +814,52 @@ def main():
 
     _ensure_model(model, console)
 
-    tg_status = (
-        f"[green]ON[/green] → chat {config.TELEGRAM_CHAT_ID}  (send /help to bot for commands)"
-        if config.TELEGRAM_ENABLED
-        else "[yellow]OFF[/yellow]  (set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID to enable)"
-    )
-
-    console.rule("[bold]ATC Tracker[/bold]")
-    console.print(f"Model   : [cyan]{model}[/cyan]")
-    kw_label = "OFF" if args.no_keywords else "ON"
-    console.print(f"Keywords: [cyan]{kw_label}[/cyan]  (press K to toggle)")
-    console.print(f"Telegram: {tg_status}")
-    console.print("")
-    console.print("Stations — press number to mute/unmute:")
-    for i, s in enumerate(STREAMS, 1):
-        console.print(_station_row(i, s, state.is_enabled(s["icao"])))
-    console.print("")
-    console.print("  [[K]] toggle keywords   [[Q]] quit")
-    console.rule()
-
-    kb_thread = threading.Thread(
-        target=_keyboard_listener, args=(state, console), daemon=True, name="keyboard"
-    )
-    kb_thread.start()
-
     log_dir = Path(__file__).parent / "logs"
     log_dir.mkdir(exist_ok=True)
     log_file = log_dir / f"atc_{datetime.now(timezone.utc).astimezone(_AEST).strftime('%Y-%m-%d')}.log"
 
-    transcriber = Transcriber(model, state, console, log_file=log_file)
+    global _display_ref
+    display = LiveDisplay(model, state, console)
+    state.display = display
+    _display_ref = display
 
-    for i, stream_cfg in enumerate(STREAMS):
-        t = threading.Thread(
-            target=_stream_loop,
-            args=(stream_cfg, transcriber, state, console),
-            daemon=True,
-            name=f"stream-{stream_cfg['icao']}",
+    with display:
+        kb_thread = threading.Thread(
+            target=_keyboard_listener, args=(state,), daemon=True, name="keyboard"
         )
-        t.start()
-        time.sleep(0.5)  # stagger starts so connection messages don't overlap
+        kb_thread.start()
 
-    if config.TELEGRAM_ENABLED:
-        tg_cmd_thread = threading.Thread(
-            target=_telegram_command_listener,
-            args=(state, console),
-            daemon=True,
-            name="telegram-cmd",
-        )
-        tg_cmd_thread.start()
+        transcriber = Transcriber(model, state, log_file=log_file)
 
-    _send_startup_notification(state)
+        for stream_cfg in STREAMS:
+            t = threading.Thread(
+                target=_stream_loop,
+                args=(stream_cfg, transcriber, state),
+                daemon=True,
+                name=f"stream-{stream_cfg['icao']}",
+            )
+            t.start()
+            time.sleep(0.5)
 
-    try:
-        state.stop_event.wait()
-    except KeyboardInterrupt:
-        state.stop_event.set()
-    finally:
-        console.print("[dim]Shutting down...[/dim]")
-        transcriber.shutdown()
-        console.print("[dim]Done.[/dim]")
+        if config.TELEGRAM_ENABLED:
+            tg_cmd_thread = threading.Thread(
+                target=_telegram_command_listener,
+                args=(state,),
+                daemon=True,
+                name="telegram-cmd",
+            )
+            tg_cmd_thread.start()
+
+        _send_startup_notification(state)
+
+        try:
+            state.stop_event.wait()
+        except KeyboardInterrupt:
+            state.stop_event.set()
+        finally:
+            transcriber.shutdown()
+
+    console.print("[dim]Done.[/dim]")
 
 
 if __name__ == "__main__":
