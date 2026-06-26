@@ -1,0 +1,467 @@
+#!/usr/bin/env python3
+"""
+ATC Tracker — YBCG Brisbane Centre live speech-to-text transcription.
+Streams MP3 audio from LiveATC.net, detects transmissions via VAD,
+transcribes with Whisper, and highlights configurable keywords.
+
+Controls:
+  K — toggle keyword highlighting on/off
+  Q / Ctrl+C — quit
+"""
+
+import argparse
+import collections
+import queue
+import sys
+import threading
+import time
+from datetime import datetime
+from typing import Optional
+
+import miniaudio
+import mlx_whisper
+import numpy as np
+import requests
+from rich.console import Console
+from rich.text import Text
+
+import config
+from config import (
+    KEYWORDS,
+    MAX_TRANSMISSION_SEC,
+    RECONNECT_DELAY_SEC,
+    STREAM_HEADERS,
+    STREAM_URL,
+    VAD_CHUNK_FRAMES,
+    VAD_RMS_THRESHOLD,
+    VAD_SAMPLE_RATE,
+    VAD_SILENCE_HANGOVER,
+    WHISPER_MODEL,
+)
+
+
+# ---------------------------------------------------------------------------
+# Shared runtime state
+# ---------------------------------------------------------------------------
+
+class SharedState:
+    def __init__(self, keywords_enabled: bool):
+        self.keywords_enabled = keywords_enabled
+        self.stop_event = threading.Event()
+        self._lock = threading.Lock()
+
+    def toggle_keywords(self) -> bool:
+        with self._lock:
+            self.keywords_enabled = not self.keywords_enabled
+            return self.keywords_enabled
+
+
+# ---------------------------------------------------------------------------
+# HTTP stream source for miniaudio
+# ---------------------------------------------------------------------------
+
+class LiveATCSource(miniaudio.StreamableSource):
+    """Wraps a requests streaming response as a miniaudio StreamableSource."""
+
+    _BUFFER_MAX = 65536  # 64 KB in-memory buffer
+
+    def __init__(self, url: str, headers: dict):
+        self._deque: collections.deque = collections.deque()
+        self._deque_bytes = 0
+        self._cond = threading.Condition()
+        self._stop = threading.Event()
+        self._error: Optional[Exception] = None
+        self._thread = threading.Thread(target=self._fetch, args=(url, headers), daemon=True)
+        self._thread.start()
+
+    def _fetch(self, url: str, headers: dict):
+        try:
+            with requests.get(url, headers=headers, stream=True, timeout=30) as resp:
+                resp.raise_for_status()
+                for chunk in resp.iter_content(chunk_size=4096):
+                    if self._stop.is_set():
+                        return
+                    if not chunk:
+                        continue
+                    with self._cond:
+                        self._deque.append(chunk)
+                        self._deque_bytes += len(chunk)
+                        # Drop oldest data if we're falling behind
+                        while self._deque_bytes > self._BUFFER_MAX and self._deque:
+                            dropped = self._deque.popleft()
+                            self._deque_bytes -= len(dropped)
+                        self._cond.notify_all()
+        except Exception as exc:
+            with self._cond:
+                self._error = exc
+                self._cond.notify_all()
+
+    def read(self, num_bytes: int) -> bytes:
+        result = bytearray()
+        while len(result) < num_bytes:
+            with self._cond:
+                while not self._deque and not self._stop.is_set() and self._error is None:
+                    self._cond.wait(timeout=1.0)
+                if self._error is not None:
+                    raise IOError(f"Stream fetch error: {self._error}") from self._error
+                if self._stop.is_set() and not self._deque:
+                    break
+                while self._deque and len(result) < num_bytes:
+                    chunk = self._deque.popleft()
+                    self._deque_bytes -= len(chunk)
+                    need = num_bytes - len(result)
+                    if len(chunk) <= need:
+                        result.extend(chunk)
+                    else:
+                        result.extend(chunk[:need])
+                        leftover = chunk[need:]
+                        self._deque.appendleft(leftover)
+                        self._deque_bytes += len(leftover)
+        return bytes(result)
+
+    def close(self):
+        self._stop.set()
+        with self._cond:
+            self._cond.notify_all()
+
+
+# ---------------------------------------------------------------------------
+# Voice Activity Detection
+# ---------------------------------------------------------------------------
+
+class VoiceActivityDetector:
+    def __init__(self, threshold: float = VAD_RMS_THRESHOLD):
+        self.threshold = threshold
+
+    def is_speech(self, chunk: np.ndarray) -> bool:
+        rms = float(np.sqrt(np.mean(chunk ** 2)))
+        return rms > self.threshold
+
+
+# ---------------------------------------------------------------------------
+# Transmission audio buffer
+# ---------------------------------------------------------------------------
+
+class TransmissionBuffer:
+    def __init__(self, sample_rate: int = VAD_SAMPLE_RATE):
+        self._chunks: list = []
+        self._sample_rate = sample_rate
+
+    def append(self, chunk: np.ndarray):
+        self._chunks.append(chunk)
+
+    def flush(self) -> np.ndarray:
+        if not self._chunks:
+            return np.array([], dtype=np.float32)
+        audio = np.concatenate(self._chunks)
+        self._chunks = []
+        return audio
+
+    @property
+    def duration_seconds(self) -> float:
+        return sum(len(c) for c in self._chunks) / self._sample_rate
+
+    @property
+    def is_empty(self) -> bool:
+        return len(self._chunks) == 0
+
+
+# ---------------------------------------------------------------------------
+# Transcriber thread
+# ---------------------------------------------------------------------------
+
+class Transcriber:
+    _MIN_DURATION = 0.5  # discard buffers shorter than this to avoid hallucination
+
+    def __init__(self, model: str, state: SharedState, console: Console):
+        self._model = model
+        self._state = state
+        self._console = console
+        self._queue: queue.Queue = queue.Queue(maxsize=1)
+        self._thread = threading.Thread(target=self._worker, daemon=True, name="transcriber")
+        self._thread.start()
+
+    def submit(self, audio: np.ndarray, duration: float) -> bool:
+        if duration < self._MIN_DURATION:
+            return False
+        try:
+            self._queue.put_nowait(audio)
+            return True
+        except queue.Full:
+            self._console.print("[yellow]⚠ Transcriber busy — dropping short TX[/yellow]")
+            return False
+
+    def _worker(self):
+        while True:
+            audio = self._queue.get()
+            if audio is None:
+                break
+            try:
+                result = mlx_whisper.transcribe(
+                    audio,
+                    path_or_hf_repo=self._model,
+                    language="en",
+                    verbose=False,
+                    temperature=0.0,
+                    no_speech_threshold=0.6,
+                )
+                text = (result.get("text") or "").strip()
+                if text:
+                    self._log(text)
+            except Exception as exc:
+                self._console.print(f"[red]Transcription error: {exc}[/red]")
+            finally:
+                self._queue.task_done()
+
+    def _log(self, text: str):
+        ts = datetime.now().strftime("%H:%M:%S")
+        prefix = Text(f"[{ts}] TX  ", style="bold green")
+        content = _highlight_keywords(text, KEYWORDS, enabled=self._state.keywords_enabled)
+        self._console.print(Text.assemble(prefix, content))
+
+    def shutdown(self):
+        self._queue.put(None)
+        self._thread.join(timeout=10)
+
+
+# ---------------------------------------------------------------------------
+# Keyword highlighting
+# ---------------------------------------------------------------------------
+
+def _highlight_keywords(text: str, keywords: list, enabled: bool) -> Text:
+    if not enabled:
+        return Text(text)
+
+    lower = text.lower()
+    # Collect all match spans
+    spans: list = []
+    for kw in keywords:
+        kw_lower = kw.lower()
+        start = 0
+        while True:
+            idx = lower.find(kw_lower, start)
+            if idx == -1:
+                break
+            spans.append((idx, idx + len(kw)))
+            start = idx + 1
+
+    if not spans:
+        return Text(text)
+
+    # Sort and merge overlapping spans
+    spans.sort()
+    merged: list = []
+    for s, e in spans:
+        if merged and s < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+
+    result = Text()
+    pos = 0
+    for s, e in merged:
+        if pos < s:
+            result.append(text[pos:s])
+        result.append(text[s:e], style="bold bright_red")
+        pos = e
+    if pos < len(text):
+        result.append(text[pos:])
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Keyboard listener
+# ---------------------------------------------------------------------------
+
+def _keyboard_listener(state: SharedState, console: Console):
+    try:
+        import termios
+        import tty as tty_mod
+
+        with open("/dev/tty", "r") as tty_fh:
+            old = termios.tcgetattr(tty_fh)
+            try:
+                tty_mod.setraw(tty_fh.fileno())
+                while not state.stop_event.is_set():
+                    ch = tty_fh.read(1)
+                    if ch.lower() == "k":
+                        enabled = state.toggle_keywords()
+                        label = "ON" if enabled else "OFF"
+                        console.print(f"[cyan]── Keywords: {label} ──[/cyan]")
+                    elif ch in ("\x03", "\x04", "q", "Q"):
+                        state.stop_event.set()
+                        break
+            finally:
+                termios.tcsetattr(tty_fh, termios.TCSADRAIN, old)
+    except Exception:
+        pass  # keyboard listener is optional
+
+
+# ---------------------------------------------------------------------------
+# Main stream loop
+# ---------------------------------------------------------------------------
+
+def _stream_loop(transcriber: Transcriber, state: SharedState, console: Console):
+    while not state.stop_event.is_set():
+        source: Optional[LiveATCSource] = None
+        try:
+            console.print("[dim]Connecting to stream...[/dim]")
+            source = LiveATCSource(STREAM_URL, STREAM_HEADERS)
+
+            pcm_gen = miniaudio.stream_any(
+                source,
+                source_format=miniaudio.FileFormat.MP3,
+                output_format=miniaudio.SampleFormat.SIGNED16,
+                nchannels=1,
+                sample_rate=VAD_SAMPLE_RATE,
+                frames_to_read=VAD_CHUNK_FRAMES,
+            )
+
+            vad = VoiceActivityDetector()
+            buf = TransmissionBuffer()
+            in_tx = False
+            silence_since: Optional[float] = None
+
+            ts = datetime.now().strftime("%H:%M:%S")
+            kw_label = "ON" if state.keywords_enabled else "OFF"
+            console.print(
+                f"[green][{ts}] Connected — YBCG Brisbane Centre | "
+                f"Keywords: {kw_label} | Press K to toggle, Q to quit[/green]"
+            )
+
+            for raw_chunk in pcm_gen:
+                if state.stop_event.is_set():
+                    break
+
+                chunk = np.frombuffer(bytes(raw_chunk), dtype=np.int16).astype(np.float32) / 32768.0
+
+                if vad.is_speech(chunk):
+                    in_tx = True
+                    silence_since = None
+                    buf.append(chunk)
+                    # Safety cap: flush mid-transmission if too long
+                    if buf.duration_seconds > MAX_TRANSMISSION_SEC:
+                        audio = buf.flush()
+                        transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE)
+                else:
+                    if in_tx:
+                        buf.append(chunk)
+                        now = time.monotonic()
+                        if silence_since is None:
+                            silence_since = now
+                        elif now - silence_since >= VAD_SILENCE_HANGOVER:
+                            audio = buf.flush()
+                            transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE)
+                            in_tx = False
+                            silence_since = None
+
+        except KeyboardInterrupt:
+            state.stop_event.set()
+            break
+        except Exception as exc:
+            if not state.stop_event.is_set():
+                console.print(f"[red]Stream error: {exc}[/red]")
+                console.print(f"[dim]Reconnecting in {RECONNECT_DELAY_SEC}s...[/dim]")
+                time.sleep(RECONNECT_DELAY_SEC)
+        finally:
+            if source:
+                source.close()
+
+
+# ---------------------------------------------------------------------------
+# Calibrate mode
+# ---------------------------------------------------------------------------
+
+def _calibrate(console: Console):
+    console.print(
+        "[cyan]Calibrate mode — printing live RMS for 15 seconds.\n"
+        "Silence should be near 0.000; transmissions should spike above 0.003.\n"
+        "Ctrl+C to stop early.[/cyan]"
+    )
+    source = LiveATCSource(STREAM_URL, STREAM_HEADERS)
+    pcm_gen = miniaudio.stream_any(
+        source,
+        source_format=miniaudio.FileFormat.MP3,
+        output_format=miniaudio.SampleFormat.SIGNED16,
+        nchannels=1,
+        sample_rate=VAD_SAMPLE_RATE,
+        frames_to_read=VAD_CHUNK_FRAMES,
+    )
+    deadline = time.monotonic() + 15
+    try:
+        for raw_chunk in pcm_gen:
+            chunk = np.frombuffer(bytes(raw_chunk), dtype=np.int16).astype(np.float32) / 32768.0
+            rms = float(np.sqrt(np.mean(chunk ** 2)))
+            bar = "█" * min(60, int(rms * 5000))
+            flag = " ← TX" if rms > VAD_RMS_THRESHOLD else ""
+            console.print(f"RMS {rms:.5f}  {bar}{flag}", highlight=False)
+            if time.monotonic() > deadline:
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        source.close()
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="ATC Tracker — YBCG Brisbane Centre live transcription"
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        metavar="REPO",
+        help="Whisper model repo (default: mlx-community/whisper-small.en)",
+    )
+    parser.add_argument(
+        "--no-keywords",
+        action="store_true",
+        help="Start with keyword highlighting disabled",
+    )
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="Print live RMS values for 15s to calibrate VAD threshold",
+    )
+    args = parser.parse_args()
+
+    console = Console()
+
+    if args.calibrate:
+        _calibrate(console)
+        return
+
+    model = args.model or WHISPER_MODEL
+
+    console.rule("[bold]ATC Tracker[/bold]")
+    console.print(f"Station : [cyan]YBCG Brisbane Centre (Gold Coast)[/cyan]")
+    console.print(f"Stream  : [dim]{STREAM_URL}[/dim]")
+    console.print(f"Model   : [cyan]{model}[/cyan]  (downloads ~230 MB on first run)")
+    console.print(f"Keywords: [cyan]{'OFF' if args.no_keywords else 'ON'}[/cyan]  (press K to toggle)")
+    console.rule()
+
+    state = SharedState(keywords_enabled=not args.no_keywords)
+
+    kb_thread = threading.Thread(
+        target=_keyboard_listener, args=(state, console), daemon=True, name="keyboard"
+    )
+    kb_thread.start()
+
+    transcriber = Transcriber(model, state, console)
+
+    try:
+        _stream_loop(transcriber, state, console)
+    except KeyboardInterrupt:
+        state.stop_event.set()
+    finally:
+        console.print("[dim]Shutting down...[/dim]")
+        transcriber.shutdown()
+        console.print("[dim]Done.[/dim]")
+
+
+if __name__ == "__main__":
+    main()

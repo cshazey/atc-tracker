@@ -1,0 +1,5 @@
+miniaudio>=1.71
+mlx-whisper>=0.4.3
+requests>=2.34.0
+numpy>=2.4.0
+rich>=13.8.0

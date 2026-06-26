@@ -1,0 +1,47 @@
+STREAM_URL = "https://s1-bos.liveatc.net/ybcg3_centre"
+
+STREAM_HEADERS = {
+    "accept": "*/*",
+    "accept-language": "en-GB,en;q=0.9",
+    "cache-control": "no-cache",
+    "icy-metadata": "0",
+    "origin": "https://www.liveatc.net",
+    "pragma": "no-cache",
+    "priority": "u=1, i",
+    "sec-ch-ua": '"Brave";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-site",
+    "sec-gpc": "1",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+}
+
+WHISPER_MODEL = "mlx-community/whisper-small.en"
+
+VAD_SAMPLE_RATE = 16000
+VAD_CHUNK_FRAMES = 320        # 20ms at 16kHz
+VAD_RMS_THRESHOLD = 0.003     # tune with --calibrate
+VAD_SILENCE_HANGOVER = 1.5    # seconds of trailing silence before flushing TX
+
+MAX_TRANSMISSION_SEC = 60
+RECONNECT_DELAY_SEC = 5
+
+KEYWORDS = [
+    "MILITARY",
+    "F18",
+    "F-18",
+    "18",
+    "EIGHTEEN",
+    "COASTAL",
+    "RESTRICTED",
+    "EMERGENCY",
+    "MAYDAY",
+    "PAN-PAN",
+    "GUARD",
+    "500",
+    "SQUAWK 7700",
+    "SQUAWK 7600",
+    "SQUAWK 7500",
+]
