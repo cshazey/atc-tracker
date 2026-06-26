@@ -387,7 +387,6 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState,
     while not state.stop_event.is_set():
         source: Optional[LiveATCSource] = None
         try:
-            console.print(f"[dim]Connecting to {icao} {station_name}...[/dim]")
             source = LiveATCSource(url, headers)
 
             pcm_gen = miniaudio.stream_any(
@@ -453,21 +452,23 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState,
 def _ensure_model(model: str, console: Console):
     """Check whether the model is cached; download it with visible feedback if not."""
     from huggingface_hub import snapshot_download
+    from huggingface_hub.utils import disable_progress_bars, enable_progress_bars
 
     console.print(f"[dim]Checking model {model}...[/dim]")
     try:
         snapshot_download(repo_id=model, local_files_only=True)
-        console.print(f"[green]✓ Model already cached — ready[/green]")
+        console.print("[green]✓ Model already cached — ready[/green]")
     except Exception:
         console.print(
-            f"[yellow]Model not cached — downloading {model} (~230 MB).\n"
-            "  This runs once and is saved to ~/.cache/huggingface/\n"
-            "  Please wait...[/yellow]"
+            f"[yellow]Downloading {model} (~480 MB) — please wait...[/yellow]"
         )
         try:
+            disable_progress_bars()  # suppress tqdm bars that corrupt Rich output
             snapshot_download(repo_id=model)
-            console.print(f"[green]✓ Model downloaded successfully[/green]")
+            enable_progress_bars()
+            console.print("[green]✓ Model downloaded successfully[/green]")
         except Exception as exc:
+            enable_progress_bars()
             console.print(
                 f"[red]Download failed: {exc}\n"
                 "  Make sure HUGGINGFACE_TOKEN is set in .env and you have internet access.[/red]"
