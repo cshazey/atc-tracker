@@ -447,6 +447,34 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState,
 
 
 # ---------------------------------------------------------------------------
+# Model download check
+# ---------------------------------------------------------------------------
+
+def _ensure_model(model: str, console: Console):
+    """Check whether the model is cached; download it with visible feedback if not."""
+    from huggingface_hub import snapshot_download
+
+    console.print(f"[dim]Checking model {model}...[/dim]")
+    try:
+        snapshot_download(repo_id=model, local_files_only=True)
+        console.print(f"[green]✓ Model already cached — ready[/green]")
+    except Exception:
+        console.print(
+            f"[yellow]Model not cached — downloading {model} (~230 MB).\n"
+            "  This runs once and is saved to ~/.cache/huggingface/\n"
+            "  Please wait...[/yellow]"
+        )
+        try:
+            snapshot_download(repo_id=model)
+            console.print(f"[green]✓ Model downloaded successfully[/green]")
+        except Exception as exc:
+            console.print(
+                f"[red]Download failed: {exc}\n"
+                "  Make sure HUGGINGFACE_TOKEN is set in .env and you have internet access.[/red]"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Calibrate mode
 # ---------------------------------------------------------------------------
 
@@ -548,6 +576,8 @@ def main():
             "[yellow]⚠ HUGGINGFACE_TOKEN not set — model download may fail.\n"
             "  Add your token to .env (see .env.example for instructions).[/yellow]"
         )
+
+    _ensure_model(model, console)
 
     tg_status = (
         f"[green]ON[/green] → chat {config.TELEGRAM_CHAT_ID}"
