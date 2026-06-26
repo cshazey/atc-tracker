@@ -5,6 +5,7 @@ Real-time speech-to-text transcription of live ATC audio from [LiveATC.net](http
 Currently monitoring:
 - **YBCG** — Brisbane Centre (Gold Coast)
 - **YSPT** — Southport
+- **YSSY** — Sydney Centre (128.600)
 
 Detects each radio call via voice activity detection, transcribes it, logs it to the terminal, and optionally forwards every transmission to Telegram. Keywords like MILITARY, MAYDAY, F-18 etc. are highlighted in red and flagged in Telegram.
 
@@ -75,8 +76,11 @@ Keywords appear in **bold red** inline. All transmissions are always logged — 
 
 | Key | Action |
 |-----|--------|
+| `1` / `2` / `3` … | Mute or unmute that station (shown in startup list) |
 | `K` | Toggle keyword highlighting on/off (does not affect Telegram) |
 | `Q` or `Ctrl+C` | Quit |
+
+Muting a station keeps the stream connected but discards transcriptions and skips Telegram for that feed. Unmuting resumes immediately — no reconnect needed.
 
 ---
 
@@ -85,10 +89,11 @@ Keywords appear in **bold red** inline. All transmissions are always logged — 
 Pass flags after `atc_tracker.py` by editing the last line of `run.command`, or run directly:
 
 ```bash
+venv/bin/python atc_tracker.py --stations YBCG YSPT          # start with only these stations active
 venv/bin/python atc_tracker.py --model mlx-community/whisper-tiny.en   # faster, less accurate
 venv/bin/python atc_tracker.py --no-keywords                            # start with highlighting off
 venv/bin/python atc_tracker.py --calibrate YBCG                        # print live RMS values for YBCG
-venv/bin/python atc_tracker.py --calibrate YSPT                        # print live RMS values for YSPT
+venv/bin/python atc_tracker.py --calibrate YSSY                        # print live RMS values for YSSY
 ```
 
 ---

@@ -13,10 +13,11 @@ This document explains how the openclaw agent can launch and use the ATC Tracker
 - Marks keyword matches (MILITARY, F-18, MAYDAY, COASTAL, etc.) with a 🔴 KEYWORD ALERT in Telegram
 
 Currently monitored stations:
-| ICAO | Name | Feed URL |
-|------|------|----------|
-| YBCG | Brisbane Centre | `https://s1-bos.liveatc.net/ybcg3_centre` |
-| YSPT | Southport | `https://s1-bos.liveatc.net/yspt2` |
+| # | ICAO | Name | Feed URL |
+|---|------|------|----------|
+| 1 | YBCG | Brisbane Centre | `https://s1-bos.liveatc.net/ybcg3_centre` |
+| 2 | YSPT | Southport | `https://s1-bos.liveatc.net/yspt2` |
+| 3 | YSSY | Sydney Centre | `https://s1-fmt2.liveatc.net/yssy1_ctr_128600` |
 
 The stream is pre-squelched at source — only actual radio calls produce output.
 
@@ -150,8 +151,11 @@ To add keywords, edit `KEYWORDS` in `config.py`.
 
 | Key | Action |
 |-----|--------|
+| `1` / `2` / `3` … | Mute or unmute that station in real time |
 | `K` | Toggle keyword highlighting in terminal (does not affect Telegram) |
 | `Q` or `Ctrl+C` | Quit |
+
+Station numbers match the order in the startup list (and the `STREAMS` list in `config.py`). Muting keeps the stream connected but drops transcriptions and Telegram messages for that feed until unmuted.
 
 ---
 

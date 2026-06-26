@@ -6,7 +6,8 @@ transcribes with Whisper, highlights configurable keywords, and forwards
 every transmission to Telegram when credentials are configured.
 
 Controls:
-  K — toggle keyword highlighting on/off
+  1/2/3/… — toggle individual stations on/off
+  K       — toggle keyword highlighting on/off
   Q / Ctrl+C — quit
 """
 
@@ -49,11 +50,21 @@ class SharedState:
         self.keywords_enabled = keywords_enabled
         self.stop_event = threading.Event()
         self._lock = threading.Lock()
+        # icao -> bool; all enabled by default, populated by main()
+        self.station_enabled: dict = {}
 
     def toggle_keywords(self) -> bool:
         with self._lock:
             self.keywords_enabled = not self.keywords_enabled
             return self.keywords_enabled
+
+    def toggle_station(self, icao: str) -> bool:
+        with self._lock:
+            self.station_enabled[icao] = not self.station_enabled.get(icao, True)
+            return self.station_enabled[icao]
+
+    def is_enabled(self, icao: str) -> bool:
+        return self.station_enabled.get(icao, True)
 
 
 # ---------------------------------------------------------------------------
@@ -61,9 +72,7 @@ class SharedState:
 # ---------------------------------------------------------------------------
 
 class LiveATCSource(miniaudio.StreamableSource):
-    """Wraps a requests streaming response as a miniaudio StreamableSource."""
-
-    _BUFFER_MAX = 65536  # 64 KB in-memory buffer
+    _BUFFER_MAX = 65536
 
     def __init__(self, url: str, headers: dict):
         self._deque: collections.deque = collections.deque()
@@ -159,10 +168,6 @@ class TransmissionBuffer:
     def duration_seconds(self) -> float:
         return sum(len(c) for c in self._chunks) / self._sample_rate
 
-    @property
-    def is_empty(self) -> bool:
-        return len(self._chunks) == 0
-
 
 # ---------------------------------------------------------------------------
 # Transcriber thread
@@ -175,8 +180,7 @@ class Transcriber:
         self._model = model
         self._state = state
         self._console = console
-        # Queue holds (audio, icao, station_name, ts) tuples; None = shutdown sentinel
-        self._queue: queue.Queue = queue.Queue(maxsize=4)
+        self._queue: queue.Queue = queue.Queue(maxsize=8)
         self._thread = threading.Thread(target=self._worker, daemon=True, name="transcriber")
         self._thread.start()
 
@@ -280,10 +284,11 @@ def _send_telegram(text: str, ts: str, icao: str, station_name: str, has_keyword
     if not config.TELEGRAM_ENABLED:
         return
     label = f"{icao} {station_name}"
-    if has_keywords:
-        header = f"🔴 <b>[KEYWORD ALERT]</b> {label}"
-    else:
-        header = f"📻 {label}"
+    header = (
+        f"🔴 <b>[KEYWORD ALERT]</b> {label}"
+        if has_keywords
+        else f"📻 {label}"
+    )
     message = f"{header}\n<code>[{ts}]</code> {html.escape(text)}"
     try:
         requests.post(
@@ -318,6 +323,17 @@ def _keyboard_listener(state: SharedState, console: Console):
                         enabled = state.toggle_keywords()
                         label = "ON" if enabled else "OFF"
                         console.print(f"[cyan]── Keywords: {label} ──[/cyan]")
+                    elif ch.isdigit() and ch != "0":
+                        idx = int(ch) - 1
+                        if idx < len(STREAMS):
+                            s = STREAMS[idx]
+                            icao = s["icao"]
+                            name = s["name"]
+                            enabled = state.toggle_station(icao)
+                            if enabled:
+                                console.print(f"[green]── [{ch}] {icao} {name}: ON ──[/green]")
+                            else:
+                                console.print(f"[red]── [{ch}] {icao} {name}: MUTED ──[/red]")
                     elif ch in ("\x03", "\x04", "q", "Q"):
                         state.stop_event.set()
                         break
@@ -371,9 +387,10 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState,
                     silence_since = None
                     buf.append(chunk)
                     if buf.duration_seconds > MAX_TRANSMISSION_SEC:
-                        ts = datetime.now().strftime("%H:%M:%S")
                         audio = buf.flush()
-                        transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts)
+                        if state.is_enabled(icao):
+                            ts = datetime.now().strftime("%H:%M:%S")
+                            transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts)
                 else:
                     if in_tx:
                         buf.append(chunk)
@@ -381,9 +398,10 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState,
                         if silence_since is None:
                             silence_since = now
                         elif now - silence_since >= VAD_SILENCE_HANGOVER:
-                            ts = datetime.now().strftime("%H:%M:%S")
                             audio = buf.flush()
-                            transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts)
+                            if state.is_enabled(icao):
+                                ts = datetime.now().strftime("%H:%M:%S")
+                                transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts)
                             in_tx = False
                             silence_since = None
 
@@ -404,7 +422,7 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState,
 def _calibrate(console: Console, stream_cfg: dict):
     icao = stream_cfg["icao"]
     console.print(
-        f"[cyan]Calibrate mode — {icao} {stream_cfg['name']} — printing live RMS for 15s.\n"
+        f"[cyan]Calibrate — {icao} {stream_cfg['name']} — printing live RMS for 15s.\n"
         "Silence ≈ 0.000; transmissions spike above 0.003. Ctrl+C to stop.[/cyan]"
     )
     source = LiveATCSource(stream_cfg["url"], stream_cfg["headers"])
@@ -452,6 +470,12 @@ def main():
         help="Start with keyword highlighting disabled",
     )
     parser.add_argument(
+        "--stations",
+        nargs="+",
+        metavar="ICAO",
+        help="Start only these stations, e.g. --stations YBCG YSPT",
+    )
+    parser.add_argument(
         "--calibrate",
         default=None,
         metavar="ICAO",
@@ -472,21 +496,34 @@ def main():
 
     model = args.model or WHISPER_MODEL
 
+    state = SharedState(keywords_enabled=not args.no_keywords)
+
+    # Initialise per-station enabled flags
+    requested = {s.upper() for s in args.stations} if args.stations else None
+    for s in STREAMS:
+        state.station_enabled[s["icao"]] = (
+            True if requested is None else s["icao"] in requested
+        )
+
     tg_status = (
         f"[green]ON[/green] → chat {config.TELEGRAM_CHAT_ID}"
         if config.TELEGRAM_ENABLED
         else "[yellow]OFF[/yellow]  (set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID to enable)"
     )
-    stream_labels = "  |  ".join(f"{s['icao']} {s['name']}" for s in STREAMS)
 
     console.rule("[bold]ATC Tracker[/bold]")
-    console.print(f"Stations: [cyan]{stream_labels}[/cyan]")
     console.print(f"Model   : [cyan]{model}[/cyan]  (downloads ~230 MB on first run)")
     console.print(f"Keywords: [cyan]{'OFF' if args.no_keywords else 'ON'}[/cyan]  (press K to toggle)")
     console.print(f"Telegram: {tg_status}")
+    console.print("")
+    console.print("Stations — press number to mute/unmute:")
+    for i, s in enumerate(STREAMS, 1):
+        enabled = state.is_enabled(s["icao"])
+        status = "[green]ON [/green]" if enabled else "[red]OFF[/red]"
+        console.print(f"  [{i}] {s['icao']} {s['name']:<20} {status}")
+    console.print("")
+    console.print("  [K] toggle keywords   [Q] quit")
     console.rule()
-
-    state = SharedState(keywords_enabled=not args.no_keywords)
 
     kb_thread = threading.Thread(
         target=_keyboard_listener, args=(state, console), daemon=True, name="keyboard"
@@ -495,7 +532,6 @@ def main():
 
     transcriber = Transcriber(model, state, console)
 
-    stream_threads = []
     for stream_cfg in STREAMS:
         t = threading.Thread(
             target=_stream_loop,
@@ -504,7 +540,6 @@ def main():
             name=f"stream-{stream_cfg['icao']}",
         )
         t.start()
-        stream_threads.append(t)
 
     try:
         state.stop_event.wait()

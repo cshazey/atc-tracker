@@ -40,6 +40,12 @@ STREAMS = [
         "url": "https://s1-bos.liveatc.net/yspt2",
         "headers": _HEADERS,
     },
+    {
+        "icao": "YSSY",
+        "name": "Sydney Centre",
+        "url": "https://s1-fmt2.liveatc.net/yssy1_ctr_128600",
+        "headers": _HEADERS,
+    },
 ]
 
 WHISPER_MODEL = "mlx-community/whisper-small.en"
