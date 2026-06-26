@@ -6,6 +6,7 @@ Currently monitoring:
 - **YBCG** — Brisbane Centre (Gold Coast)
 - **YSPT** — Southport
 - **YSSY** — Sydney Centre (128.600)
+- **YBBN** — Brisbane Tower
 
 Detects each radio call via voice activity detection, transcribes it, logs it to the terminal, and optionally forwards every transmission to Telegram. Keywords like MILITARY, MAYDAY, F-18 etc. are highlighted in red and flagged in Telegram.
 
@@ -22,7 +23,7 @@ Detects each radio call via voice activity detection, transcribes it, logs it to
 
 ### 1. Configure credentials
 
-Copy `.env.example` to `.env` and fill in your Telegram details:
+Copy `.env.example` to `.env` and fill in your details:
 
 ```bash
 cp .env.example .env
@@ -33,7 +34,11 @@ Then open `.env` and set:
 ```
 TELEGRAM_BOT_TOKEN=123456789:ABCdef...
 TELEGRAM_CHAT_ID=987654321
+
+HUGGINGFACE_TOKEN=hf_...
 ```
+
+**HuggingFace token** is required to download the Whisper model. Get a free one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) (read-only access is enough).
 
 > Telegram is optional — the tracker logs to terminal without it. See [Telegram setup](#telegram-setup) below.
 

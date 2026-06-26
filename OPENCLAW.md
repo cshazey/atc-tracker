@@ -18,6 +18,7 @@ Currently monitored stations:
 | 1 | YBCG | Brisbane Centre | `https://s1-bos.liveatc.net/ybcg3_centre` |
 | 2 | YSPT | Southport | `https://s1-bos.liveatc.net/yspt2` |
 | 3 | YSSY | Sydney Centre | `https://s1-fmt2.liveatc.net/yssy1_ctr_128600` |
+| 4 | YBBN | Brisbane Tower | `https://s1-fmt2.liveatc.net/ybbn7_twr` |
 
 The stream is pre-squelched at source — only actual radio calls produce output.
 
@@ -36,7 +37,11 @@ Current contents template (copy from `.env.example`):
 ```
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
+
+HUGGINGFACE_TOKEN=
 ```
+
+`HUGGINGFACE_TOKEN` is required to download Whisper models. Get a free read-only token at https://huggingface.co/settings/tokens.
 
 ### One-time Telegram setup (if not already done)
 

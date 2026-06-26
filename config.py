@@ -46,6 +46,12 @@ STREAMS = [
         "url": "https://s1-fmt2.liveatc.net/yssy1_ctr_128600",
         "headers": _HEADERS,
     },
+    {
+        "icao": "YBBN",
+        "name": "Brisbane Tower",
+        "url": "https://s1-fmt2.liveatc.net/ybbn7_twr",
+        "headers": _HEADERS,
+    },
 ]
 
 WHISPER_MODEL = "mlx-community/whisper-small.en"
@@ -84,3 +90,7 @@ KEYWORDS = [
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+
+# HuggingFace token — required to download Whisper models.
+# Get a free token at https://huggingface.co/settings/tokens (read-only is fine).
+HUGGINGFACE_TOKEN = os.environ.get("HUGGINGFACE_TOKEN", "")

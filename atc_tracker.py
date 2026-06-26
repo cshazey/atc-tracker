@@ -213,7 +213,16 @@ class Transcriber:
                 if text:
                     self._log(text, icao, station_name, ts)
             except Exception as exc:
-                self._console.print(f"[red]Transcription error [{icao}]: {exc}[/red]")
+                msg = str(exc)
+                if "401" in msg or "authentication" in msg.lower() or "username or password" in msg.lower():
+                    self._console.print(
+                        "[red]HuggingFace authentication required to download the Whisper model.\n"
+                        "  1. Sign up free at https://huggingface.co\n"
+                        "  2. Create a token at https://huggingface.co/settings/tokens\n"
+                        "  3. Add HUGGINGFACE_TOKEN=your_token to your .env file and restart.[/red]"
+                    )
+                else:
+                    self._console.print(f"[red]Transcription error [{icao}]: {exc}[/red]")
             finally:
                 self._queue.task_done()
 
@@ -319,6 +328,20 @@ def _send_startup_notification(state: SharedState) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Station status display
+# ---------------------------------------------------------------------------
+
+def _print_station_status(state: SharedState, console: Console):
+    lines = ["[bold cyan]── Station status ──────────────────────────[/bold cyan]"]
+    for i, s in enumerate(STREAMS, 1):
+        enabled = state.is_enabled(s["icao"])
+        status = "[green]ON   [/green]" if enabled else "[red]MUTED[/red]"
+        lines.append(f"  [{i}] {s['icao']}  {s['name']:<22} {status}")
+    lines.append("[bold cyan]────────────────────────────────────────────[/bold cyan]")
+    console.print("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
 # Keyboard listener
 # ---------------------------------------------------------------------------
 
@@ -340,14 +363,8 @@ def _keyboard_listener(state: SharedState, console: Console):
                     elif ch.isdigit() and ch != "0":
                         idx = int(ch) - 1
                         if idx < len(STREAMS):
-                            s = STREAMS[idx]
-                            icao = s["icao"]
-                            name = s["name"]
-                            enabled = state.toggle_station(icao)
-                            if enabled:
-                                console.print(f"[green]── [{ch}] {icao} {name}: ON ──[/green]")
-                            else:
-                                console.print(f"[red]── [{ch}] {icao} {name}: MUTED ──[/red]")
+                            state.toggle_station(STREAMS[idx]["icao"])
+                            _print_station_status(state, console)
                     elif ch in ("\x03", "\x04", "q", "Q"):
                         state.stop_event.set()
                         break
@@ -519,6 +536,19 @@ def main():
             True if requested is None else s["icao"] in requested
         )
 
+    # HuggingFace login — needed to download Whisper models
+    if config.HUGGINGFACE_TOKEN:
+        try:
+            from huggingface_hub import login as hf_login
+            hf_login(token=config.HUGGINGFACE_TOKEN, add_to_git_credential=False)
+        except Exception as exc:
+            console.print(f"[yellow]HuggingFace login warning: {exc}[/yellow]")
+    else:
+        console.print(
+            "[yellow]⚠ HUGGINGFACE_TOKEN not set — model download may fail.\n"
+            "  Add your token to .env (see .env.example for instructions).[/yellow]"
+        )
+
     tg_status = (
         f"[green]ON[/green] → chat {config.TELEGRAM_CHAT_ID}"
         if config.TELEGRAM_ENABLED
@@ -546,7 +576,7 @@ def main():
 
     transcriber = Transcriber(model, state, console)
 
-    for stream_cfg in STREAMS:
+    for i, stream_cfg in enumerate(STREAMS):
         t = threading.Thread(
             target=_stream_loop,
             args=(stream_cfg, transcriber, state, console),
@@ -554,6 +584,7 @@ def main():
             name=f"stream-{stream_cfg['icao']}",
         )
         t.start()
+        time.sleep(0.5)  # stagger starts so connection messages don't overlap
 
     _send_startup_notification(state)
 
