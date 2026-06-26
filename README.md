@@ -95,7 +95,7 @@ Pass flags after `atc_tracker.py` by editing the last line of `run.command`, or 
 
 ```bash
 venv/bin/python atc_tracker.py --stations YBCG YSPT          # start with only these stations active
-venv/bin/python atc_tracker.py --model mlx-community/whisper-tiny.en   # faster, less accurate
+venv/bin/python atc_tracker.py --model mlx-community/whisper-tiny      # faster, less accurate
 venv/bin/python atc_tracker.py --no-keywords                            # start with highlighting off
 venv/bin/python atc_tracker.py --calibrate YBCG                        # print live RMS values for YBCG
 venv/bin/python atc_tracker.py --calibrate YSSY                        # print live RMS values for YSSY
