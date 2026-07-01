@@ -188,9 +188,13 @@ To add keywords, edit `KEYWORDS` in `config.py`.
 |-----|--------|
 | `1` / `2` / `3` … | Mute or unmute that station in real time |
 | `K` | Toggle keyword highlighting in terminal (does not affect Telegram/Discord) |
+| `T` | Toggle Telegram sending on/off (starts OFF by default) |
+| `P` | Pause/resume transcription & forwarding |
 | `Q` or `Ctrl+C` | Quit |
 
 Station numbers match the order in the startup list (and the `STREAMS` list in `config.py`). Muting keeps the stream connected but drops transcriptions and Telegram/Discord messages for that feed until unmuted, and posts a status update to that station's Discord channel.
+
+**Telegram defaults to disabled** on every startup, even with valid credentials in `.env` — press `T` to enable it for that session. While disabled, the tracker doesn't poll Telegram's API at all (no outgoing sends, no incoming command polling), so a Telegram-side outage or timeout can't produce log noise unless it's been turned on. Discord is unaffected and follows its own `DISCORD_ENABLED` gate as before.
 
 ---
 
@@ -199,7 +203,7 @@ Station numbers match the order in the startup list (and the `STREAMS` list in `
 **No Telegram messages:**
 - Check `.env` has both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` filled in
 - The user must have sent `/start` to the bot at least once
-- Startup banner shows `Telegram: ON → chat <id>` if credentials loaded correctly
+- Telegram starts OFF every session by design — press `T` to enable it, then the startup banner shows `Telegram: ON → chat <id>`
 
 **No Discord messages:**
 - Check `.env` has `DISCORD_BOT_TOKEN`, `DISCORD_ALERTS_CHANNEL_ID`, `DISCORD_COMMANDS_CHANNEL_ID`, and the station's `DISCORD_CHANNEL_<ICAO>` filled in

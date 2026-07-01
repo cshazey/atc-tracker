@@ -71,7 +71,7 @@ On **first run** it creates a virtual environment and installs all dependencies 
 Stations: YBCG Brisbane Centre  |  YSPT Southport
 Model   : mlx-community/whisper-small.en
 Keywords: ON  (press K to toggle)
-Telegram: ON → chat 987654321
+Telegram: OFF  (press T to enable)
 Discord : ON  (see #commands for commands)
 ──────────────────────────────────────────────
 [10:42:31] YBCG Brisbane Centre    │ Connected
@@ -92,9 +92,13 @@ Keywords appear in **bold red** inline. All transmissions are always logged — 
 |-----|--------|
 | `1` / `2` / `3` … | Mute or unmute that station (shown in startup list) |
 | `K` | Toggle keyword highlighting on/off (does not affect Telegram) |
+| `T` | Toggle Telegram sending on/off |
+| `P` | Pause/resume transcription & forwarding |
 | `Q` or `Ctrl+C` | Quit |
 
-Muting a station keeps the stream connected but discards transcriptions and skips Telegram for that feed. Unmuting resumes immediately — no reconnect needed.
+Muting a station keeps the stream connected but discards transcriptions and skips Telegram/Discord for that feed. Unmuting resumes immediately — no reconnect needed.
+
+**Telegram starts disabled by default** even when `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` are configured — press `T` to turn it on for the session. This also stops the tracker from polling Telegram at all while off, so a flaky Telegram connection can't spam the terminal with timeout warnings when you don't need it. Discord is unaffected by this toggle.
 
 ---
 

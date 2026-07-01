@@ -218,11 +218,15 @@ class LiveDisplay:
         kw = self._state.keywords_enabled
         h.append("ON   " if kw else "OFF  ", style="green" if kw else "yellow")
         h.append("  Telegram: ", style="dim")
-        if config.TELEGRAM_ENABLED:
+        if not config.TELEGRAM_ENABLED:
+            h.append("OFF", style="yellow")
+            h.append("  (not configured)", style="dim")
+        elif _telegram_active:
             h.append("ON", style="green")
             h.append(f"  →  {config.TELEGRAM_CHAT_ID}  (/help for commands)", style="dim")
         else:
             h.append("OFF", style="yellow")
+            h.append("  (press T to enable)", style="dim")
         if self._state.paused:
             h.append("  ⏸ PAUSED", style="bold red")
         h.append("\n")
@@ -244,13 +248,18 @@ class LiveDisplay:
                      style="green" if enabled else "red")
 
         h.append("  " + "─" * 50 + "\n", style="dim cyan")
-        h.append("  [K] keywords   [P] pause/resume   [Q] quit", style="dim")
+        h.append("  [K] keywords   [T] telegram   [P] pause/resume   [Q] quit", style="dim")
 
         return h
 
 
 # Module-level display reference used by _post_telegram (set in main).
 _display_ref: Optional[LiveDisplay] = None
+
+# Runtime toggle for Telegram sending — off by default even when credentials
+# are configured. Toggle with the "T" key. Gates _post_telegram only; Discord
+# and the terminal/log file are unaffected.
+_telegram_active: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -552,7 +561,7 @@ def _highlight_keywords(text: str, keywords: list, enabled: bool) -> Text:
 # ---------------------------------------------------------------------------
 
 def _post_telegram(message: str) -> None:
-    if not config.TELEGRAM_ENABLED:
+    if not config.TELEGRAM_ENABLED or not _telegram_active:
         return
     try:
         requests.post(
@@ -912,6 +921,10 @@ def _telegram_command_listener(state: SharedState) -> None:
     base = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}"
 
     while not state.stop_event.is_set():
+        if not _telegram_active:
+            # Disabled — don't touch the network at all until re-enabled.
+            state.stop_event.wait(2)
+            continue
         try:
             resp = requests.get(
                 f"{base}/getUpdates",
@@ -996,6 +1009,15 @@ def _keyboard_listener(state: SharedState) -> None:
                     if ch.lower() == "k":
                         state.toggle_keywords()
                         if state.display:
+                            state.display.refresh()
+                    elif ch.lower() == "t":
+                        global _telegram_active
+                        _telegram_active = not _telegram_active
+                        if state.display:
+                            ts = _now_ts()
+                            msg = "📨 Telegram ENABLED" if _telegram_active else "📨 Telegram DISABLED"
+                            style = "bold green" if _telegram_active else "bold yellow"
+                            state.display.log(Text(f"[{ts}] {msg}", style=style))
                             state.display.refresh()
                     elif ch.lower() == "p":
                         paused = state.toggle_pause()
