@@ -8,7 +8,7 @@ Currently monitoring:
 - **YSSY** — Sydney Centre (128.600)
 - **YBBN** — Brisbane Tower
 
-Detects each radio call via voice activity detection, transcribes it, logs it to the terminal, and optionally forwards every transmission to Telegram. Keywords like MILITARY, MAYDAY, F-18 etc. are highlighted in red and flagged in Telegram.
+Detects each radio call via voice activity detection, transcribes it, logs it to the terminal, and optionally forwards every transmission to Telegram and/or Discord (dual-send — both can run at once). Keywords like MILITARY, MAYDAY, F-18 etc. are highlighted in red and flagged as alerts on both platforms.
 
 ---
 
@@ -35,12 +35,20 @@ Then open `.env` and set:
 TELEGRAM_BOT_TOKEN=123456789:ABCdef...
 TELEGRAM_CHAT_ID=987654321
 
+DISCORD_BOT_TOKEN=...
+DISCORD_ALERTS_CHANNEL_ID=...
+DISCORD_COMMANDS_CHANNEL_ID=...
+DISCORD_CHANNEL_YBCG=...
+DISCORD_CHANNEL_YSPT=...
+DISCORD_CHANNEL_YSSY=...
+DISCORD_CHANNEL_YBBN=...
+
 HUGGINGFACE_TOKEN=hf_...
 ```
 
 **HuggingFace token** is required to download the Whisper model. Get a free one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) (read-only access is enough).
 
-> Telegram is optional — the tracker logs to terminal without it. See [Telegram setup](#telegram-setup) below.
+> Telegram and Discord are both optional — the tracker logs to terminal without either. See [Telegram setup](#telegram-setup) and [Discord setup](#discord-setup) below.
 
 ### 2. Run
 
@@ -64,6 +72,7 @@ Stations: YBCG Brisbane Centre  |  YSPT Southport
 Model   : mlx-community/whisper-small.en
 Keywords: ON  (press K to toggle)
 Telegram: ON → chat 987654321
+Discord : ON  (see #commands for commands)
 ──────────────────────────────────────────────
 [10:42:31] YBCG Brisbane Centre    │ Connected
 [10:42:31] YSPT Southport          │ Connected
@@ -122,6 +131,19 @@ The tracker sends every transcription to your chat. Keyword matches get a 🔴 p
 
 ---
 
+## Discord setup
+
+Full walkthrough, permissions, and a per-channel reference are in **[DISCORD.md](DISCORD.md)**. Short version:
+
+1. Create a bot at the [Discord Developer Portal](https://discord.com/developers/applications), copy its token
+2. Invite it to your server (OAuth2 → URL Generator → scope `bot`, permissions View Channel / Send Messages / Embed Links / Read Message History — Embed Links is easy to miss and required, since almost every message is an embed)
+3. Create one channel per station + `#alerts` + a private `#commands` channel
+4. Copy each channel's ID (enable Developer Mode first) and paste everything into `.env`
+
+Each station posts only its own transmissions to its own channel; keyword matches also mirror into `#alerts`; `/mute`, `/unmute`, `/pause`, `/resume`, `/keywords`, `/status`, `/help` all work from `#commands`, exactly like the Telegram commands below — both platforms stay in sync regardless of which one you send a command from.
+
+---
+
 ## Adding stations
 
 Edit `STREAMS` in `config.py` to add more LiveATC feeds:
@@ -145,6 +167,8 @@ STREAMS = [
 ```
 
 Each station streams and transcribes independently in its own thread.
+
+If Discord is enabled, also create a channel for the new station and add its ID as `DISCORD_CHANNEL_<ICAO>` in `.env` (e.g. `DISCORD_CHANNEL_YMML=...`) — see [DISCORD.md](DISCORD.md).
 
 ---
 
@@ -179,6 +203,7 @@ Silence should read near `0.000`; transmissions spike above `0.003`. Adjust `VAD
 | File | What to edit |
 |------|-------------|
 | `.env` | Telegram credentials |
+| `.env` | Discord bot token + channel IDs (see [DISCORD.md](DISCORD.md)) |
 | `config.py` → `STREAMS` | Add/remove ATC feeds |
 | `config.py` → `KEYWORDS` | Add/remove flagged keywords |
 | `config.py` → `WHISPER_MODEL` | Swap Whisper model size |

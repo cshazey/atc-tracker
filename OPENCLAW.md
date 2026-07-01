@@ -1,6 +1,6 @@
 # OPENCLAW Integration Guide — ATC Tracker
 
-This document explains how the openclaw agent can launch and use the ATC Tracker to monitor live ATC radio traffic and forward every transcribed transmission to the user's Telegram chat.
+This document explains how the openclaw agent can launch and use the ATC Tracker to monitor live ATC radio traffic and forward every transcribed transmission to the user's Telegram chat and/or Discord server.
 
 ---
 
@@ -10,7 +10,8 @@ This document explains how the openclaw agent can launch and use the ATC Tracker
 
 - Prints every transcription to the terminal log with a timestamp and station label
 - Sends every transcription to the configured Telegram chat automatically
-- Marks keyword matches (MILITARY, F-18, MAYDAY, COASTAL, etc.) with a 🔴 KEYWORD ALERT in Telegram
+- Sends every transcription to that station's own Discord channel automatically (dual-send alongside Telegram — see `DISCORD.md`)
+- Marks keyword matches (MILITARY, F-18, MAYDAY, COASTAL, etc.) with a 🔴 KEYWORD ALERT in Telegram, and mirrors the same matches into Discord's `#alerts` channel
 
 Currently monitored stations:
 | # | ICAO | Name | Feed URL |
@@ -38,6 +39,14 @@ Current contents template (copy from `.env.example`):
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 
+DISCORD_BOT_TOKEN=
+DISCORD_ALERTS_CHANNEL_ID=
+DISCORD_COMMANDS_CHANNEL_ID=
+DISCORD_CHANNEL_YBCG=
+DISCORD_CHANNEL_YSPT=
+DISCORD_CHANNEL_YSSY=
+DISCORD_CHANNEL_YBBN=
+
 HUGGINGFACE_TOKEN=
 ```
 
@@ -49,6 +58,10 @@ HUGGINGFACE_TOKEN=
 2. Message `@userinfobot` on Telegram → copy the numeric chat ID
 3. Send `/start` to the new bot so it can message the user
 4. Paste both values into `.env`
+
+### One-time Discord setup (if not already done)
+
+Full walkthrough and a per-channel reference are in `DISCORD.md`. Summary: create a bot + invite it to the server with View Channel / Send Messages / Embed Links / Read Message History (Embed Links is required — nearly every message the bot sends is an embed, and it fails silently-ish without this permission), create one channel per station plus `#alerts` and a private `#commands` channel, copy each channel's ID, paste everything into `.env`.
 
 ---
 
@@ -93,8 +106,9 @@ kill <PID>
 
 - Each station streams independently in its own thread
 - Every radio call is transcribed when the transmission ends (silence detected)
-- A Telegram message is sent for every call, regardless of keywords
-- Keyword matches get a 🔴 KEYWORD ALERT prefix
+- A Telegram message and a Discord embed (in that station's channel) are sent for every call, regardless of keywords
+- Keyword matches get a 🔴 KEYWORD ALERT prefix on Telegram and also mirror into Discord's `#alerts` channel
+- Muting/unmuting a station or pausing/resuming the whole tracker (from either platform) posts a status update into that station's Discord channel(s) too
 
 **Regular call (Telegram):**
 ```
@@ -106,6 +120,20 @@ kill <PID>
 ```
 🔴 [KEYWORD ALERT] YBCG Brisbane Centre
 [10:43:15] MAYDAY MAYDAY MAYDAY Sunstate 654 engine failure
+```
+
+**Regular call (Discord embed, posted in `#ybcg-brisbane-center`):**
+```
+📻 YBCG Brisbane Centre
+Golf Bravo Charlie cleared COASTAL two departure runway two eight
+14:42:38 AEST / 04:42:38Z
+```
+
+**Keyword alert (Discord embed, posted in both the station channel and `#alerts`):**
+```
+🔴 KEYWORD ALERT — YBCG Brisbane Centre
+MAYDAY MAYDAY MAYDAY Sunstate 654 engine failure
+14:43:15 AEST / 04:43:15Z
 ```
 
 ---
@@ -134,11 +162,13 @@ STREAMS = [
 
 The stream URL comes from the LiveATC feed page — inspect the audio player network requests to find the direct MP3 stream URL.
 
+If Discord is enabled, also create a channel for the new station and set `DISCORD_CHANNEL_<ICAO>` in `.env` (see `DISCORD.md`).
+
 ---
 
 ## Monitored keywords
 
-These terms trigger 🔴 KEYWORD ALERT in Telegram:
+These terms trigger a 🔴 KEYWORD ALERT on both Telegram and Discord (mirrored into `#alerts`):
 
 | Category | Keywords |
 |---|---|
@@ -157,10 +187,10 @@ To add keywords, edit `KEYWORDS` in `config.py`.
 | Key | Action |
 |-----|--------|
 | `1` / `2` / `3` … | Mute or unmute that station in real time |
-| `K` | Toggle keyword highlighting in terminal (does not affect Telegram) |
+| `K` | Toggle keyword highlighting in terminal (does not affect Telegram/Discord) |
 | `Q` or `Ctrl+C` | Quit |
 
-Station numbers match the order in the startup list (and the `STREAMS` list in `config.py`). Muting keeps the stream connected but drops transcriptions and Telegram messages for that feed until unmuted.
+Station numbers match the order in the startup list (and the `STREAMS` list in `config.py`). Muting keeps the stream connected but drops transcriptions and Telegram/Discord messages for that feed until unmuted, and posts a status update to that station's Discord channel.
 
 ---
 
@@ -170,6 +200,11 @@ Station numbers match the order in the startup list (and the `STREAMS` list in `
 - Check `.env` has both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` filled in
 - The user must have sent `/start` to the bot at least once
 - Startup banner shows `Telegram: ON → chat <id>` if credentials loaded correctly
+
+**No Discord messages:**
+- Check `.env` has `DISCORD_BOT_TOKEN`, `DISCORD_ALERTS_CHANNEL_ID`, `DISCORD_COMMANDS_CHANNEL_ID`, and the station's `DISCORD_CHANNEL_<ICAO>` filled in
+- Startup banner shows `Discord: ON` if credentials loaded correctly
+- A `403 Missing Access` in the terminal log means the bot hasn't been invited to the server, or lacks a permission override on that specific channel (common for a private `#commands` channel) — see `DISCORD.md` → Troubleshooting
 
 **No transcriptions:**
 - The stream may simply be quiet — ATC is not always active
@@ -187,6 +222,10 @@ Station numbers match the order in the startup list (and the `STREAMS` list in `
 |----------|---------|---------|
 | `.env` | `TELEGRAM_BOT_TOKEN` | Telegram bot API token |
 | `.env` | `TELEGRAM_CHAT_ID` | Telegram chat/user ID |
+| `.env` | `DISCORD_BOT_TOKEN` | Discord bot token |
+| `.env` | `DISCORD_ALERTS_CHANNEL_ID` | Discord `#alerts` channel ID |
+| `.env` | `DISCORD_COMMANDS_CHANNEL_ID` | Discord `#commands` channel ID |
+| `.env` | `DISCORD_CHANNEL_<ICAO>` | Discord channel ID for that station |
 | `config.py` → `STREAMS` | list of dicts | ATC feeds to monitor |
 | `config.py` → `KEYWORDS` | list of strings | Terms that trigger 🔴 alerts |
 | `config.py` → `WHISPER_MODEL` | string | Whisper model size |

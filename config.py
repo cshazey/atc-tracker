@@ -37,7 +37,7 @@ STREAMS = [
     {
         "icao": "YSPT",
         "name": "Southport",
-        "url": "https://s1-bos.liveatc.net/yspt2",
+        "url": "https://s1-fmt2.liveatc.net/yspt2",
         "headers": _HEADERS,
     },
     {
@@ -63,7 +63,11 @@ WHISPER_INITIAL_PROMPT = (
     "Juliet Yankee Foxtrot, inbound Coolangatta, request traffic information. "
     "YSSY YBBN YBCG YMML YPPH YPAD YBTL Coolangatta Archerfield Williamtown Amberley Archerfield. "
     "RAAF Williamtown, Hornet formation, C130 Hercules, P-8 Poseidon, Dragon one, Roulette four. "
-    "squawk seven thousand seven hundred, MAYDAY MAYDAY MAYDAY, affirm, negative, roger."
+    "squawk seven thousand seven hundred, MAYDAY MAYDAY MAYDAY, affirm, negative, roger. "
+    "Southport traffic, Golf Kilo Delta, Cessna one seven two, inbound Southport, "
+    "CTAF one two six decimal seven, joining crosswind runway one three, circuits. "
+    "Southport traffic, final runway one three, stop and go. Taxiing to holding point. "
+    "Southport CTAF, turning base, turning final, clear of the runway, backtracking."
 )
 
 AUDIO_PREPROCESSING = True
@@ -81,6 +85,7 @@ ATC_CORRECTIONS = [
     (r'\bDesmond\b', 'decimal'),
     (r'\bRager\b', 'roger'),
     (r'\bRaja\b', 'roger'),
+    (r'\bSouth Port\b', 'Southport'),
 ]
 
 KEYWORDS = [
@@ -109,6 +114,27 @@ KEYWORDS = [
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+
+# ---------------------------------------------------------------------------
+# Discord integration (dual-send alongside Telegram — see DISCORD.md)
+# One channel per station + one #alerts channel + one #commands channel.
+# Each station's channel id is looked up via DISCORD_CHANNEL_<ICAO> and merged
+# into its STREAMS entry, so adding a station only means one more STREAMS
+# dict + one more env var.
+# ---------------------------------------------------------------------------
+DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
+DISCORD_ALERTS_CHANNEL_ID = os.environ.get("DISCORD_ALERTS_CHANNEL_ID", "")
+DISCORD_COMMANDS_CHANNEL_ID = os.environ.get("DISCORD_COMMANDS_CHANNEL_ID", "")
+
+for _s in STREAMS:
+    _s["discord_channel_id"] = os.environ.get(f"DISCORD_CHANNEL_{_s['icao']}", "")
+
+DISCORD_ENABLED = bool(
+    DISCORD_BOT_TOKEN
+    and DISCORD_ALERTS_CHANNEL_ID
+    and DISCORD_COMMANDS_CHANNEL_ID
+    and any(_s["discord_channel_id"] for _s in STREAMS)
+)
 
 # HuggingFace token — required to download Whisper models.
 # Get a free token at https://huggingface.co/settings/tokens (read-only is fine).

@@ -23,7 +23,7 @@ import time
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
 import miniaudio
@@ -39,6 +39,8 @@ import config
 from config import (
     ATC_CORRECTIONS,
     AUDIO_PREPROCESSING,
+    DISCORD_ALERTS_CHANNEL_ID,
+    DISCORD_COMMANDS_CHANNEL_ID,
     KEYWORDS,
     MAX_TRANSMISSION_SEC,
     RECONNECT_DELAY_SEC,
@@ -58,6 +60,11 @@ def _now_ts() -> str:
     utc = datetime.now(timezone.utc)
     aest = utc.astimezone(_AEST)
     return f"{aest.strftime('%H:%M:%S')} AEST / {utc.strftime('%H:%M:%S')}Z"
+
+
+def _now_iso() -> str:
+    """ISO8601 UTC timestamp for Discord's native embed timestamp field."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -105,8 +112,8 @@ class LiveDisplay:
     stdout exclusively while active.
     """
 
-    # header: top-border + 2 info lines + 2 separators + N station lines + controls + bottom-border
-    _HEADER_LINES = 7  # base count excluding stations
+    # header: top-border + 3 info lines + 2 separators + N station lines + controls + bottom-border
+    _HEADER_LINES = 8  # base count excluding stations
 
     def __init__(self, model: str, state: SharedState, console: Console):
         self._model = model
@@ -220,6 +227,14 @@ class LiveDisplay:
             h.append("  ⏸ PAUSED", style="bold red")
         h.append("\n")
 
+        h.append("  Discord : ", style="dim")
+        if config.DISCORD_ENABLED:
+            h.append("ON", style="green")
+            h.append("  (see #commands for commands)", style="dim")
+        else:
+            h.append("OFF", style="yellow")
+        h.append("\n")
+
         h.append("  " + "─" * 50 + "\n", style="dim cyan")
 
         for i, s in enumerate(STREAMS, 1):
@@ -317,9 +332,12 @@ class VoiceActivityDetector:
 
 
 class AudioPreprocessor:
-    """Bandpass filter (300–3400 Hz) + amplitude normalisation for VHF radio audio."""
+    """Bandpass filter (300–3400 Hz) + squelch click trim + amplitude normalisation for VHF radio audio."""
 
     _SR = VAD_SAMPLE_RATE
+    # VHF squelch opens/closes with a brief noise click; trim those edges before Whisper sees the audio.
+    _LEAD_SAMPLES = int(_SR * 0.080)   # 80 ms — squelch open click
+    _TAIL_SAMPLES = int(_SR * 0.050)   # 50 ms — squelch close click
 
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
@@ -329,6 +347,9 @@ class AudioPreprocessor:
         if not self.enabled or len(audio) == 0:
             return audio
         filtered = sosfilt(self._sos, audio).astype(np.float32)
+        trim = self._LEAD_SAMPLES + self._TAIL_SAMPLES
+        if len(filtered) > trim:
+            filtered = filtered[self._LEAD_SAMPLES: len(filtered) - self._TAIL_SAMPLES]
         peak = float(np.percentile(np.abs(filtered), 95))
         if peak > 1e-6:
             filtered = (filtered * (0.7 / peak)).clip(-1.0, 1.0).astype(np.float32)
@@ -378,11 +399,11 @@ class Transcriber:
         self._thread = threading.Thread(target=self._worker, daemon=True, name="transcriber")
         self._thread.start()
 
-    def submit(self, audio: np.ndarray, duration: float, icao: str, station_name: str, ts: str) -> bool:
+    def submit(self, audio: np.ndarray, duration: float, icao: str, station_name: str, ts: str, ts_iso: str) -> bool:
         if duration < self._MIN_DURATION:
             return False
         try:
-            self._queue.put_nowait((audio, duration, icao, station_name, ts))
+            self._queue.put_nowait((audio, duration, icao, station_name, ts, ts_iso))
             return True
         except queue.Full:
             self._tui_log(Text(f"⚠ [{icao}] Transcriber busy — dropping TX", style="yellow"))
@@ -397,7 +418,7 @@ class Transcriber:
             item = self._queue.get()
             if item is None:
                 break
-            audio, duration, icao, station_name, ts = item
+            audio, duration, icao, station_name, ts, ts_iso = item
             try:
                 result = mlx_whisper.transcribe(
                     audio,
@@ -412,7 +433,7 @@ class Transcriber:
                 )
                 text = (result.get("text") or "").strip()
                 if text:
-                    self._log(text, icao, station_name, ts, duration)
+                    self._log(text, icao, station_name, ts, ts_iso, duration)
             except Exception as exc:
                 msg = str(exc)
                 if "401" in msg or "authentication" in msg.lower() or "username or password" in msg.lower():
@@ -425,7 +446,7 @@ class Transcriber:
             finally:
                 self._queue.task_done()
 
-    def _log(self, text: str, icao: str, station_name: str, ts: str, duration: float = 0.0):
+    def _log(self, text: str, icao: str, station_name: str, ts: str, ts_iso: str, duration: float = 0.0):
         text = _apply_atc_corrections(text)
         if _is_hallucination(text):
             return
@@ -439,7 +460,9 @@ class Transcriber:
         line.append(f"[{ts}] {icao} {station_name:<16} {dur_str}│ ", style="bold green")
         line.append_text(_highlight_keywords(text, KEYWORDS, enabled=self._state.keywords_enabled))
         self._tui_log(line)
-        _send_telegram(text, ts, icao, station_name, _has_keywords(text, KEYWORDS))
+        has_kw = _has_keywords(text, KEYWORDS)
+        _send_telegram(text, ts, icao, station_name, has_kw)
+        _send_discord(text, ts, ts_iso, icao, station_name, has_kw)
         if self._log_file:
             try:
                 with open(self._log_file, "a", encoding="utf-8") as f:
@@ -567,6 +590,209 @@ def _send_startup_notification(state: SharedState) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Discord helpers (dual-send alongside Telegram — see DISCORD.md)
+# ---------------------------------------------------------------------------
+
+_DISCORD_API = "https://discord.com/api/v10"
+
+
+def _discord_channel_for(icao: str) -> str:
+    for s in STREAMS:
+        if s["icao"] == icao:
+            return s.get("discord_channel_id", "")
+    return ""
+
+
+def _post_discord(channel_id: str, content: Optional[str] = None, embed: Optional[dict] = None) -> Optional[str]:
+    if not config.DISCORD_ENABLED or not channel_id:
+        return None
+    payload: dict = {}
+    if content:
+        payload["content"] = content[:2000]
+    if embed:
+        embed["title"] = embed.get("title", "")[:256]
+        if embed.get("description"):
+            embed["description"] = embed["description"][:4096]
+        payload["embeds"] = [embed]
+    if not payload:
+        return None
+    headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
+    url = f"{_DISCORD_API}/channels/{channel_id}/messages"
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=10)
+        if resp.status_code == 429:
+            retry_after = 1.0
+            try:
+                retry_after = float(resp.json().get("retry_after", 1.0))
+            except Exception:
+                pass
+            time.sleep(min(retry_after, 5.0) + 0.05)
+            resp = requests.post(url, json=payload, headers=headers, timeout=10)
+        if resp.status_code >= 400:
+            if _display_ref is not None:
+                _display_ref.log(Text(
+                    f"⚠ Discord send failed [{channel_id}]: HTTP {resp.status_code} {resp.text[:200]}",
+                    style="dim yellow",
+                ))
+            return None
+        return resp.json().get("id")
+    except Exception as exc:
+        if _display_ref is not None:
+            _display_ref.log(Text(f"⚠ Discord send failed: {exc}", style="dim yellow"))
+        return None
+
+
+def _pin_discord(channel_id: str, message_id: str) -> None:
+    if not config.DISCORD_ENABLED or not channel_id or not message_id:
+        return
+    headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
+    try:
+        resp = requests.put(
+            f"{_DISCORD_API}/channels/{channel_id}/pins/{message_id}",
+            headers=headers, timeout=10,
+        )
+        if resp.status_code >= 400 and _display_ref is not None:
+            _display_ref.log(Text(
+                f"⚠ Discord pin failed [{channel_id}]: HTTP {resp.status_code} {resp.text[:200]}",
+                style="dim yellow",
+            ))
+    except Exception as exc:
+        if _display_ref is not None:
+            _display_ref.log(Text(f"⚠ Discord pin failed: {exc}", style="dim yellow"))
+
+
+def _unpin_discord(channel_id: str, message_id: str) -> None:
+    if not config.DISCORD_ENABLED or not channel_id or not message_id:
+        return
+    headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
+    try:
+        requests.delete(
+            f"{_DISCORD_API}/channels/{channel_id}/pins/{message_id}",
+            headers=headers, timeout=10,
+        )
+    except Exception:
+        pass  # previous pin may already be gone (manually unpinned, channel pin limit, etc.)
+
+
+def _send_discord(text: str, ts: str, ts_iso: str, icao: str, station_name: str, has_keywords: bool) -> None:
+    color = 0xE74C3C if has_keywords else 0x2ECC71
+    title = f"\U0001f534 {icao} {station_name}" if has_keywords else f"\U0001f4fb {icao} {station_name}"
+    # "timestamp" drives Discord's own localized clock display in the embed —
+    # set to when the transmission was received (ts_iso), not when this POST
+    # happens, since transcription can lag behind receipt by several seconds.
+    embed = {"title": title, "description": text, "color": color, "footer": {"text": ts}, "timestamp": ts_iso}
+    channel_id = _discord_channel_for(icao)
+    if channel_id:
+        _post_discord(channel_id, embed=dict(embed))
+    if has_keywords and DISCORD_ALERTS_CHANNEL_ID:
+        alert_embed = dict(embed)
+        alert_embed["title"] = f"\U0001f534 KEYWORD ALERT — {icao} {station_name}"
+        _post_discord(DISCORD_ALERTS_CHANNEL_ID, embed=alert_embed)
+
+
+def _send_discord_startup(state: SharedState) -> None:
+    ts = _now_ts()
+    for s in STREAMS:
+        enabled = state.is_enabled(s["icao"])
+        icon = "✅" if enabled else "\U0001f507"
+        embed = {
+            "title": f"{icon} {s['icao']} {s['name']}",
+            "description": f"ATC Tracker started — {'active' if enabled else 'muted'}",
+            "color": 0x2ECC71 if enabled else 0x95A5A6,
+            "footer": {"text": ts},
+        }
+        _post_discord(s.get("discord_channel_id", ""), embed=embed)
+    lines = ["\U0001f7e2 **ATC Tracker started**", ""]
+    for s in STREAMS:
+        icon = "✅" if state.is_enabled(s["icao"]) else "\U0001f507"
+        lines.append(f"{icon} {s['icao']} {s['name']}")
+    lines.append("\nSend `/help` for commands.")
+    _post_discord(DISCORD_COMMANDS_CHANNEL_ID, content="\n".join(lines))
+
+
+def _html_to_discord_md(html_text: str) -> str:
+    """Convert the small HTML subset Telegram replies use into Discord markdown."""
+    out = html_text.replace("<b>", "**").replace("</b>", "**")
+    out = out.replace("<code>", "`").replace("</code>", "`")
+    return html.unescape(out)
+
+
+def _discord_respond(msg: str) -> None:
+    _post_discord(DISCORD_COMMANDS_CHANNEL_ID, content=_html_to_discord_md(msg))
+
+
+def _broadcast_station_status(station: dict, enabled: bool) -> None:
+    if not config.DISCORD_ENABLED:
+        return
+    channel_id = station.get("discord_channel_id", "")
+    if not channel_id:
+        return
+    icon = "✅" if enabled else "\U0001f507"
+    label = "Active" if enabled else "Muted"
+    embed = {
+        "title": f"{icon} {station['icao']} {station['name']} — {label}",
+        "color": 0x2ECC71 if enabled else 0x95A5A6,
+        "footer": {"text": _now_ts()},
+    }
+    _post_discord(channel_id, embed=embed)
+
+
+def _broadcast_pause_status(paused: bool) -> None:
+    if not config.DISCORD_ENABLED:
+        return
+    icon = "⏸" if paused else "▶️"
+    label = "Paused" if paused else "Resumed"
+    detail = "Transcription & forwarding stopped" if paused else "Transcription active"
+    embed = {
+        "title": f"{icon} ATC Tracker {label}",
+        "description": detail,
+        "color": 0xF1C40F if paused else 0x2ECC71,
+        "footer": {"text": _now_ts()},
+    }
+    for s in STREAMS:
+        channel_id = s.get("discord_channel_id", "")
+        if channel_id:
+            _post_discord(channel_id, embed=dict(embed))
+
+
+# Tracks the currently-pinned connection-status message per station channel,
+# so the previous one can be unpinned when a new one is pinned.
+_pinned_stream_status: dict = {}  # channel_id -> message_id
+
+
+def _broadcast_stream_status(station: dict, connected: bool, detail: str = "") -> None:
+    """Posts a connect/disconnect embed to a station's channel, and pins it —
+    unpinning the previous connection-status message first so only the current
+    one stays pinned. Called only on state transitions (not every reconnect
+    attempt) to avoid spamming the channel while a feed is persistently down."""
+    if not config.DISCORD_ENABLED:
+        return
+    channel_id = station.get("discord_channel_id", "")
+    if not channel_id:
+        return
+    if connected:
+        embed = {
+            "title": f"\U0001f7e2 {station['icao']} {station['name']} — Connected",
+            "color": 0x2ECC71,
+            "footer": {"text": _now_ts()},
+        }
+    else:
+        embed = {
+            "title": f"\U0001f534 {station['icao']} {station['name']} — Disconnected",
+            "description": f"{detail[:200]}\nReconnecting in {RECONNECT_DELAY_SEC}s…" if detail else f"Reconnecting in {RECONNECT_DELAY_SEC}s…",
+            "color": 0xE74C3C,
+            "footer": {"text": _now_ts()},
+        }
+    message_id = _post_discord(channel_id, embed=embed)
+    if message_id:
+        prev_id = _pinned_stream_status.get(channel_id)
+        if prev_id and prev_id != message_id:
+            _unpin_discord(channel_id, prev_id)
+        _pin_discord(channel_id, message_id)
+        _pinned_stream_status[channel_id] = message_id
+
+
+# ---------------------------------------------------------------------------
 # Telegram command listener (bidirectional control)
 # ---------------------------------------------------------------------------
 
@@ -583,7 +809,12 @@ def _resolve_station(arg: str) -> Optional[dict]:
     return None
 
 
-def _handle_command(text: str, state: SharedState) -> None:
+def _handle_command(
+    text: str,
+    state: SharedState,
+    respond: Callable[[str], None],
+    source: str = "Telegram",
+) -> None:
     if not text.startswith("/"):
         return
     parts = text.split(None, 2)
@@ -595,7 +826,7 @@ def _handle_command(text: str, state: SharedState) -> None:
             state.display.log(Text(msg, style=style))
 
     if cmd == "help":
-        _post_telegram(
+        respond(
             "\U0001f4e1 <b>ATC Tracker commands</b>\n\n"
             "/status — show all station states\n"
             "/mute 1  or  /mute YBCG — mute a station\n"
@@ -617,7 +848,7 @@ def _handle_command(text: str, state: SharedState) -> None:
         lines.append(f"\nKeywords: <b>{kw}</b>")
         paused_str = "⏸ Paused" if state.paused else "▶ Running"
         lines.append(f"Status: <b>{paused_str}</b>")
-        _post_telegram("\n".join(lines))
+        respond("\n".join(lines))
 
     elif cmd in ("mute", "unmute"):
         want_enabled = cmd == "unmute"
@@ -626,21 +857,23 @@ def _handle_command(text: str, state: SharedState) -> None:
         if arg == "all":
             for s in STREAMS:
                 state.station_enabled[s["icao"]] = want_enabled
-            _post_telegram(f"{icon} All stations {label}")
-            tui(f"Telegram → all stations {label}")
+                _broadcast_station_status(s, want_enabled)
+            respond(f"{icon} All stations {label}")
+            tui(f"{source} → all stations {label}")
             if state.display:
                 state.display.refresh()
         else:
             station = _resolve_station(arg)
             if station is None:
-                _post_telegram(
+                respond(
                     f"⚠ Unknown station: <code>{arg}</code>\n"
                     f"Use a number (1–{len(STREAMS)}) or ICAO code."
                 )
                 return
             state.station_enabled[station["icao"]] = want_enabled
-            _post_telegram(f"{icon} {station['icao']} {station['name']} — {label}")
-            tui(f"Telegram → {station['icao']} {label}")
+            _broadcast_station_status(station, want_enabled)
+            respond(f"{icon} {station['icao']} {station['name']} — {label}")
+            tui(f"{source} → {station['icao']} {label}")
             if state.display:
                 state.display.refresh()
 
@@ -650,12 +883,12 @@ def _handle_command(text: str, state: SharedState) -> None:
             with state._lock:
                 state.keywords_enabled = want
             kw_label = "ON" if want else "OFF"
-            _post_telegram(f"\U0001f50d Keywords: <b>{kw_label}</b>")
-            tui(f"Telegram → Keywords {kw_label}")
+            respond(f"\U0001f50d Keywords: <b>{kw_label}</b>")
+            tui(f"{source} → Keywords {kw_label}")
             if state.display:
                 state.display.refresh()
         else:
-            _post_telegram("Usage: /keywords on  or  /keywords off")
+            respond("Usage: /keywords on  or  /keywords off")
 
     elif cmd in ("pause", "resume"):
         want_paused = cmd == "pause"
@@ -663,14 +896,15 @@ def _handle_command(text: str, state: SharedState) -> None:
             state.paused = want_paused
         icon = "⏸" if want_paused else "▶️"
         label = "paused" if want_paused else "resumed"
-        detail = "transcription & Telegram stopped" if want_paused else "transcription active"
-        _post_telegram(f"{icon} ATC Tracker <b>{label}</b> — {detail}")
-        tui(f"Telegram → {label}", style="bold yellow" if want_paused else "bold green")
+        detail = "transcription & forwarding stopped" if want_paused else "transcription active"
+        _broadcast_pause_status(want_paused)
+        respond(f"{icon} ATC Tracker <b>{label}</b> — {detail}")
+        tui(f"{source} → {label}", style="bold yellow" if want_paused else "bold green")
         if state.display:
             state.display.refresh()
 
     else:
-        _post_telegram(f"Unknown command: <code>/{cmd}</code>\nSend /help for a list.")
+        respond(f"Unknown command: <code>/{cmd}</code>\nSend /help for a list.")
 
 
 def _telegram_command_listener(state: SharedState) -> None:
@@ -692,12 +926,56 @@ def _telegram_command_listener(state: SharedState) -> None:
                 if chat_id != str(config.TELEGRAM_CHAT_ID):
                     continue
                 text = (msg.get("text") or "").strip()
-                _handle_command(text, state)
+                _handle_command(text, state, respond=_post_telegram, source="Telegram")
         except Exception as exc:
             if not state.stop_event.is_set():
                 if state.display:
                     state.display.log(Text(f"⚠ Telegram poll error: {exc}", style="dim yellow"))
                 time.sleep(RECONNECT_DELAY_SEC)
+
+
+def _discord_command_listener(state: SharedState) -> None:
+    channel_id = DISCORD_COMMANDS_CHANNEL_ID
+    headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
+    base_url = f"{_DISCORD_API}/channels/{channel_id}/messages"
+
+    # Seed last_id from the newest existing message so old command history
+    # in #commands isn't replayed on startup.
+    last_id: Optional[str] = None
+    seed_failed = False
+    try:
+        resp = requests.get(base_url, params={"limit": 1}, headers=headers, timeout=10)
+        msgs = resp.json()
+        if isinstance(msgs, list) and msgs:
+            last_id = msgs[0]["id"]
+    except Exception:
+        seed_failed = True
+
+    while not state.stop_event.is_set():
+        try:
+            params = {"limit": 50}
+            if last_id:
+                params["after"] = last_id
+            resp = requests.get(base_url, params=params, headers=headers, timeout=15)
+            msgs = resp.json()
+            if isinstance(msgs, list) and msgs:
+                ordered = sorted(msgs, key=lambda m: int(m["id"]))
+                for msg in ordered:
+                    last_id = msg["id"]
+                    if seed_failed:
+                        # First cycle after a failed seed: capture last_id but
+                        # skip processing to avoid replaying old history.
+                        continue
+                    if msg.get("author", {}).get("bot"):
+                        continue
+                    text = (msg.get("content") or "").strip()
+                    _handle_command(text, state, respond=_discord_respond, source="Discord")
+                seed_failed = False
+        except Exception as exc:
+            if not state.stop_event.is_set():
+                if state.display:
+                    state.display.log(Text(f"⚠ Discord poll error: {exc}", style="dim yellow"))
+        state.stop_event.wait(2.5)
 
 
 # ---------------------------------------------------------------------------
@@ -721,6 +999,7 @@ def _keyboard_listener(state: SharedState) -> None:
                             state.display.refresh()
                     elif ch.lower() == "p":
                         paused = state.toggle_pause()
+                        _broadcast_pause_status(paused)
                         if state.display:
                             ts = _now_ts()
                             msg = "⏸ PAUSED — transcription & Telegram stopped" if paused else "▶ RESUMED — transcription active"
@@ -730,7 +1009,8 @@ def _keyboard_listener(state: SharedState) -> None:
                     elif ch.isdigit() and ch != "0":
                         idx = int(ch) - 1
                         if idx < len(STREAMS):
-                            state.toggle_station(STREAMS[idx]["icao"])
+                            enabled = state.toggle_station(STREAMS[idx]["icao"])
+                            _broadcast_station_status(STREAMS[idx], enabled)
                             if state.display:
                                 state.display.refresh()
                     elif ch in ("\x03", "\x04", "q", "Q"):
@@ -756,6 +1036,8 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
         if state.display:
             state.display.log(line)
 
+    was_connected = False
+
     while not state.stop_event.is_set():
         source: Optional[LiveATCSource] = None
         try:
@@ -780,6 +1062,9 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
             line.append(f"[{ts}] {icao} {station_name:<16}  ", style="bold green")
             line.append("│ Connected", style="green")
             tui_log(line)
+            if not was_connected:
+                _broadcast_stream_status(stream_cfg, connected=True)
+                was_connected = True
 
             for raw_chunk in pcm_gen:
                 if state.stop_event.is_set():
@@ -795,7 +1080,8 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
                         audio = _preprocessor.process(buf.flush())
                         if state.is_enabled(icao) and not state.paused:
                             ts = _now_ts()
-                            transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts)
+                            ts_iso = _now_iso()
+                            transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts, ts_iso)
                 else:
                     if in_tx:
                         buf.append(chunk)
@@ -806,7 +1092,8 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
                             audio = _preprocessor.process(buf.flush())
                             if state.is_enabled(icao) and not state.paused:
                                 ts = _now_ts()
-                                transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts)
+                                ts_iso = _now_iso()
+                                transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts, ts_iso)
                             in_tx = False
                             silence_since = None
 
@@ -814,6 +1101,9 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
             if not state.stop_event.is_set():
                 tui_log(Text(f"⚠ {icao}: {exc}", style="red"))
                 tui_log(Text(f"  Reconnecting in {RECONNECT_DELAY_SEC}s…", style="dim"))
+                if was_connected:
+                    _broadcast_stream_status(stream_cfg, connected=False, detail=str(exc))
+                    was_connected = False
                 time.sleep(RECONNECT_DELAY_SEC)
         finally:
             if source:
@@ -972,7 +1262,18 @@ def main() -> None:
             )
             tg_cmd_thread.start()
 
+        if config.DISCORD_ENABLED:
+            dc_cmd_thread = threading.Thread(
+                target=_discord_command_listener,
+                args=(state,),
+                daemon=True,
+                name="discord-cmd",
+            )
+            dc_cmd_thread.start()
+
         _send_startup_notification(state)
+        if config.DISCORD_ENABLED:
+            _send_discord_startup(state)
 
         try:
             state.stop_event.wait()
