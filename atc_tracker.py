@@ -958,6 +958,8 @@ def _discord_command_listener(state: SharedState) -> None:
     seed_failed = False
     try:
         resp = requests.get(base_url, params={"limit": 1}, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            raise RuntimeError(f"HTTP {resp.status_code} {resp.text[:200]}")
         msgs = resp.json()
         if isinstance(msgs, list) and msgs:
             last_id = msgs[0]["id"]
@@ -970,6 +972,16 @@ def _discord_command_listener(state: SharedState) -> None:
             if last_id:
                 params["after"] = last_id
             resp = requests.get(base_url, params=params, headers=headers, timeout=15)
+            if resp.status_code == 429:
+                retry_after = 1.0
+                try:
+                    retry_after = float(resp.json().get("retry_after", 1.0))
+                except Exception:
+                    pass
+                state.stop_event.wait(min(retry_after, 10.0) + 0.05)
+                continue
+            if resp.status_code != 200:
+                raise RuntimeError(f"HTTP {resp.status_code} {resp.text[:200]}")
             msgs = resp.json()
             if isinstance(msgs, list) and msgs:
                 ordered = sorted(msgs, key=lambda m: int(m["id"]))
