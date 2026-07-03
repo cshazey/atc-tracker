@@ -31,19 +31,13 @@ STREAMS = [
     {
         "icao": "YBCG",
         "name": "Brisbane Centre",
-        "url": "https://s1-bos.liveatc.net/ybcg3_centre",
+        "url": "https://s1-fmt2.liveatc.net/ybcg3_centre",
         "headers": _HEADERS,
     },
     {
         "icao": "YSPT",
         "name": "Southport",
-        "url": "https://s1-fmt2.liveatc.net/yspt2",
-        "headers": _HEADERS,
-    },
-    {
-        "icao": "YSSY",
-        "name": "Sydney Centre",
-        "url": "https://s1-fmt2.liveatc.net/yssy1_ctr_128600",
+        "url": "https://s1-bos.liveatc.net/yspt2",
         "headers": _HEADERS,
     },
     {

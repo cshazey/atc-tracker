@@ -16,10 +16,9 @@ This document explains how the openclaw agent can launch and use the ATC Tracker
 Currently monitored stations:
 | # | ICAO | Name | Feed URL |
 |---|------|------|----------|
-| 1 | YBCG | Brisbane Centre | `https://s1-bos.liveatc.net/ybcg3_centre` |
+| 1 | YBCG | Brisbane Centre | `https://s1-fmt2.liveatc.net/ybcg3_centre` |
 | 2 | YSPT | Southport | `https://s1-bos.liveatc.net/yspt2` |
-| 3 | YSSY | Sydney Centre | `https://s1-fmt2.liveatc.net/yssy1_ctr_128600` |
-| 4 | YBBN | Brisbane Tower | `https://s1-fmt2.liveatc.net/ybbn7_twr` |
+| 3 | YBBN | Brisbane Tower | `https://s1-fmt2.liveatc.net/ybbn7_twr` |
 
 The stream is pre-squelched at source — only actual radio calls produce output.
 
@@ -44,7 +43,6 @@ DISCORD_ALERTS_CHANNEL_ID=
 DISCORD_COMMANDS_CHANNEL_ID=
 DISCORD_CHANNEL_YBCG=
 DISCORD_CHANNEL_YSPT=
-DISCORD_CHANNEL_YSSY=
 DISCORD_CHANNEL_YBBN=
 
 HUGGINGFACE_TOKEN=
@@ -147,7 +145,7 @@ STREAMS = [
     {
         "icao": "YBCG",
         "name": "Brisbane Centre",
-        "url": "https://s1-bos.liveatc.net/ybcg3_centre",
+        "url": "https://s1-fmt2.liveatc.net/ybcg3_centre",
         "headers": _HEADERS,
     },
     {

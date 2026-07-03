@@ -5,7 +5,6 @@ Real-time speech-to-text transcription of live ATC audio from [LiveATC.net](http
 Currently monitoring:
 - **YBCG** — Brisbane Centre (Gold Coast)
 - **YSPT** — Southport
-- **YSSY** — Sydney Centre (128.600)
 - **YBBN** — Brisbane Tower
 
 Detects each radio call via voice activity detection, transcribes it, logs it to the terminal, and optionally forwards every transmission to Telegram and/or Discord (dual-send — both can run at once). Keywords like MILITARY, MAYDAY, F-18 etc. are highlighted in red and flagged as alerts on both platforms.
@@ -40,7 +39,6 @@ DISCORD_ALERTS_CHANNEL_ID=...
 DISCORD_COMMANDS_CHANNEL_ID=...
 DISCORD_CHANNEL_YBCG=...
 DISCORD_CHANNEL_YSPT=...
-DISCORD_CHANNEL_YSSY=...
 DISCORD_CHANNEL_YBBN=...
 
 HUGGINGFACE_TOKEN=hf_...
@@ -111,7 +109,6 @@ venv/bin/python atc_tracker.py --stations YBCG YSPT          # start with only t
 venv/bin/python atc_tracker.py --model mlx-community/whisper-tiny-mlx  # faster, less accurate
 venv/bin/python atc_tracker.py --no-keywords                            # start with highlighting off
 venv/bin/python atc_tracker.py --calibrate YBCG                        # print live RMS values for YBCG
-venv/bin/python atc_tracker.py --calibrate YSSY                        # print live RMS values for YSSY
 ```
 
 ---
@@ -157,7 +154,7 @@ STREAMS = [
     {
         "icao": "YBCG",
         "name": "Brisbane Centre",
-        "url": "https://s1-bos.liveatc.net/ybcg3_centre",
+        "url": "https://s1-fmt2.liveatc.net/ybcg3_centre",
         "headers": _HEADERS,
     },
     {

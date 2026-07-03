@@ -31,7 +31,6 @@ DISCORD_ALERTS_CHANNEL_ID=
 DISCORD_COMMANDS_CHANNEL_ID=
 DISCORD_CHANNEL_YBCG=
 DISCORD_CHANNEL_YSPT=
-DISCORD_CHANNEL_YSSY=
 DISCORD_CHANNEL_YBBN=
 ```
 Discord is active once `DISCORD_BOT_TOKEN`, `DISCORD_ALERTS_CHANNEL_ID`, `DISCORD_COMMANDS_CHANNEL_ID`, and at least one `DISCORD_CHANNEL_<ICAO>` are set (`config.DISCORD_ENABLED`). The terminal header shows `Discord: ON` when this is satisfied.
@@ -45,11 +44,10 @@ Discord is active once `DISCORD_BOT_TOKEN`, `DISCORD_ALERTS_CHANNEL_ID`, `DISCOR
 | ctafs | `#ybcg-brisbane-center` | YBCG Brisbane Centre | `DISCORD_CHANNEL_YBCG` |
 | ctafs | `#yspt-southport-ctaf` | YSPT Southport | `DISCORD_CHANNEL_YSPT` |
 | ctafs | `#ybbn-brisbane-center` | YBBN Brisbane Tower | `DISCORD_CHANNEL_YBBN` |
-| ctafs | `#yssy-sydney-center` | YSSY Sydney Centre | `DISCORD_CHANNEL_YSSY` |
 | alerts | `#alerts` | Every station (keyword matches only) | `DISCORD_ALERTS_CHANNEL_ID` |
 | admin | `#commands` (private) | — (control channel) | `DISCORD_COMMANDS_CHANNEL_ID` |
 
-### `#ybcg-brisbane-center` / `#yspt-southport-ctaf` / `#ybbn-brisbane-center` / `#yssy-sydney-center`
+### `#ybcg-brisbane-center` / `#yspt-southport-ctaf` / `#ybbn-brisbane-center`
 **Purpose:** live transcript feed for that station only.
 **Posts when:** every transmission on that station (not just keyword matches).
 **Example:**
