@@ -141,7 +141,17 @@ Full walkthrough, permissions, and a per-channel reference are in **[DISCORD.md]
 3. Create one channel per station + `#alerts` + a private `#commands` channel
 4. Copy each channel's ID (enable Developer Mode first) and paste everything into `.env`
 
-Each station posts only its own transmissions to its own channel; keyword matches also mirror into `#alerts`; `/mute`, `/unmute`, `/pause`, `/resume`, `/keywords`, `/status`, `/help` all work from `#commands`, exactly like the Telegram commands below — both platforms stay in sync regardless of which one you send a command from.
+Each station posts only its own transmissions to its own channel; keyword matches also mirror into `#alerts`; `/mute`, `/unmute`, `/pause`, `/resume`, `/keywords`, `/status`, `/url`, `/urls`, `/seturl`, `/reseturl`, `/help` all work from `#commands`, exactly like the Telegram commands below — both platforms stay in sync regardless of which one you send a command from.
+
+### Updating a LiveATC stream URL while running
+
+If LiveATC changes one of the connection links, send this in `#commands`:
+
+```text
+/seturl YBCG https://s1-fmt2.liveatc.net/new-feed-link
+```
+
+The affected station reconnects using the new URL and the override is saved to `runtime_config.json`, which is local-only and ignored by git. Use `/url YBCG` or `/urls` to check the active URL, and `/reseturl YBCG` to return to the default in `config.py`.
 
 ---
 

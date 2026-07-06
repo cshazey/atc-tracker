@@ -8,6 +8,7 @@ venv/
 env/
 *.log
 logs/
+runtime_config.json
 .DS_Store
 *.egg-info/
 dist/

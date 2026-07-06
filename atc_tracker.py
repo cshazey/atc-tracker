@@ -14,6 +14,7 @@ Controls:
 import argparse
 import collections
 import html
+import json
 import queue
 import re
 import shutil
@@ -24,6 +25,7 @@ from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import miniaudio
@@ -71,14 +73,68 @@ def _now_iso() -> str:
 # Shared runtime state
 # ---------------------------------------------------------------------------
 
+class RuntimeConfig:
+    """Persist runtime changes that should survive restarts."""
+
+    def __init__(self, path: Path):
+        self._path = path
+        self._lock = threading.Lock()
+        self._stream_urls: dict[str, str] = {}
+        self._load()
+
+    def _load(self) -> None:
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except Exception:
+            return
+        stream_urls = data.get("stream_urls", {})
+        if isinstance(stream_urls, dict):
+            self._stream_urls = {
+                str(k).upper(): str(v)
+                for k, v in stream_urls.items()
+                if isinstance(k, str) and isinstance(v, str) and v.strip()
+            }
+
+    def _save_locked(self) -> None:
+        data = {"stream_urls": dict(sorted(self._stream_urls.items()))}
+        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(self._path)
+
+    def stream_overrides(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._stream_urls)
+
+    def set_stream_url(self, icao: str, url: str) -> None:
+        with self._lock:
+            self._stream_urls[icao.upper()] = url
+            self._save_locked()
+
+    def reset_stream_url(self, icao: str) -> bool:
+        with self._lock:
+            existed = icao.upper() in self._stream_urls
+            self._stream_urls.pop(icao.upper(), None)
+            self._save_locked()
+            return existed
+
+
 class SharedState:
-    def __init__(self, keywords_enabled: bool):
+    def __init__(self, keywords_enabled: bool, runtime_config: RuntimeConfig):
         self.keywords_enabled = keywords_enabled
         self.paused = False
         self.stop_event = threading.Event()
         self._lock = threading.Lock()
         self.station_enabled: dict = {}
         self.display: Optional["LiveDisplay"] = None
+        self._runtime_config = runtime_config
+        self._default_stream_urls = {s["icao"]: s["url"] for s in STREAMS}
+        self._stream_urls = dict(self._default_stream_urls)
+        self._stream_versions = {s["icao"]: 0 for s in STREAMS}
+        for icao, url in runtime_config.stream_overrides().items():
+            if icao in self._stream_urls:
+                self._stream_urls[icao] = url
 
     def toggle_keywords(self) -> bool:
         with self._lock:
@@ -97,6 +153,60 @@ class SharedState:
 
     def is_enabled(self, icao: str) -> bool:
         return self.station_enabled.get(icao, True)
+
+    def get_stream_url(self, icao: str) -> str:
+        with self._lock:
+            return self._stream_urls.get(icao, self._default_stream_urls.get(icao, ""))
+
+    def get_default_stream_url(self, icao: str) -> str:
+        return self._default_stream_urls.get(icao, "")
+
+    def get_stream_url_snapshot(self, icao: str) -> tuple[str, int]:
+        with self._lock:
+            return (
+                self._stream_urls.get(icao, self._default_stream_urls.get(icao, "")),
+                self._stream_versions.get(icao, 0),
+            )
+
+    def get_stream_url_version(self, icao: str) -> int:
+        with self._lock:
+            return self._stream_versions.get(icao, 0)
+
+    def set_stream_url(self, icao: str, url: str) -> bool:
+        icao = icao.upper()
+        with self._lock:
+            if self._stream_urls.get(icao) == url:
+                return False
+            self._stream_urls[icao] = url
+            self._stream_versions[icao] = self._stream_versions.get(icao, 0) + 1
+        self._runtime_config.set_stream_url(icao, url)
+        return True
+
+    def reset_stream_url(self, icao: str) -> bool:
+        icao = icao.upper()
+        default_url = self._default_stream_urls.get(icao, "")
+        with self._lock:
+            changed = self._stream_urls.get(icao) != default_url
+            self._stream_urls[icao] = default_url
+            if changed:
+                self._stream_versions[icao] = self._stream_versions.get(icao, 0) + 1
+        persisted = self._runtime_config.reset_stream_url(icao)
+        return changed or persisted
+
+    def has_stream_override(self, icao: str) -> bool:
+        with self._lock:
+            return self._stream_urls.get(icao) != self._default_stream_urls.get(icao)
+
+
+def _valid_stream_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def _format_stream_url_line(state: SharedState, station: dict) -> str:
+    icao = station["icao"]
+    suffix = " (override)" if state.has_stream_override(icao) else " (default)"
+    return f"{icao} {station['name']}: <code>{html.escape(state.get_stream_url(icao))}</code>{suffix}"
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +715,61 @@ def _send_startup_notification(state: SharedState) -> None:
 _DISCORD_API = "https://discord.com/api/v10"
 
 
+class DiscordOutbox:
+    """Background sender for transcript posts so Discord cannot stall Whisper."""
+
+    def __init__(self, maxsize: int = 100):
+        self._queue: queue.Queue = queue.Queue(maxsize=maxsize)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._worker, daemon=True, name="discord-outbox")
+        self._thread.start()
+
+    def submit(self, channel_id: str, content: Optional[str] = None, embed: Optional[dict] = None, priority: bool = False) -> None:
+        if not config.DISCORD_ENABLED or not channel_id:
+            return
+        item = (channel_id, content, dict(embed) if embed else None)
+        try:
+            self._queue.put_nowait(item)
+            return
+        except queue.Full:
+            if priority:
+                try:
+                    self._queue.get_nowait()
+                    self._queue.task_done()
+                    self._queue.put_nowait(item)
+                    return
+                except Exception:
+                    pass
+            if _display_ref is not None:
+                _display_ref.log(Text("⚠ Discord outbox full — dropping transcript post", style="dim yellow"))
+
+    def _worker(self) -> None:
+        while not self._stop.is_set():
+            try:
+                item = self._queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if item is None:
+                self._queue.task_done()
+                break
+            channel_id, content, embed = item
+            try:
+                _post_discord(channel_id, content=content, embed=embed)
+            finally:
+                self._queue.task_done()
+
+    def shutdown(self) -> None:
+        self._stop.set()
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
+        self._thread.join(timeout=5)
+
+
+_discord_outbox: Optional[DiscordOutbox] = None
+
+
 def _discord_channel_for(icao: str) -> str:
     for s in STREAMS:
         if s["icao"] == icao:
@@ -651,6 +816,13 @@ def _post_discord(channel_id: str, content: Optional[str] = None, embed: Optiona
         return None
 
 
+def _enqueue_discord(channel_id: str, content: Optional[str] = None, embed: Optional[dict] = None, priority: bool = False) -> None:
+    if _discord_outbox is not None:
+        _discord_outbox.submit(channel_id, content=content, embed=embed, priority=priority)
+    else:
+        _post_discord(channel_id, content=content, embed=embed)
+
+
 def _pin_discord(channel_id: str, message_id: str) -> None:
     if not config.DISCORD_ENABLED or not channel_id or not message_id:
         return
@@ -692,11 +864,11 @@ def _send_discord(text: str, ts: str, ts_iso: str, icao: str, station_name: str,
     embed = {"title": title, "description": text, "color": color, "footer": {"text": ts}, "timestamp": ts_iso}
     channel_id = _discord_channel_for(icao)
     if channel_id:
-        _post_discord(channel_id, embed=dict(embed))
+        _enqueue_discord(channel_id, embed=dict(embed))
     if has_keywords and DISCORD_ALERTS_CHANNEL_ID:
         alert_embed = dict(embed)
         alert_embed["title"] = f"\U0001f534 KEYWORD ALERT — {icao} {station_name}"
-        _post_discord(DISCORD_ALERTS_CHANNEL_ID, embed=alert_embed)
+        _enqueue_discord(DISCORD_ALERTS_CHANNEL_ID, embed=alert_embed, priority=True)
 
 
 def _send_discord_startup(state: SharedState) -> None:
@@ -828,7 +1000,9 @@ def _handle_command(
         return
     parts = text.split(None, 2)
     cmd = parts[0].lower().lstrip("/")
-    arg = parts[1].lower() if len(parts) > 1 else ""
+    arg = parts[1] if len(parts) > 1 else ""
+    arg_l = arg.lower()
+    rest = parts[2].strip() if len(parts) > 2 else ""
 
     def tui(msg: str, style: str = "dim cyan") -> None:
         if state.display:
@@ -842,6 +1016,10 @@ def _handle_command(
             "/unmute 1  or  /unmute YBCG — unmute a station\n"
             "/mute all — mute every station\n"
             "/unmute all — unmute every station\n"
+            "/url YBCG — show a station stream URL\n"
+            "/urls — show all stream URLs\n"
+            "/seturl YBCG https://... — update a stream URL\n"
+            "/reseturl YBCG — restore the default stream URL\n"
             "/keywords on|off — toggle keyword highlighting\n"
             "/pause — suspend all transcription & forwarding\n"
             "/resume — restart transcription & forwarding\n"
@@ -852,18 +1030,22 @@ def _handle_command(
         lines = ["\U0001f4e1 <b>Station status</b>"]
         for i, s in enumerate(STREAMS, 1):
             icon = "✅" if state.is_enabled(s["icao"]) else "\U0001f507"
-            lines.append(f"{icon} [{i}] {s['icao']} {s['name']}")
+            override = " override" if state.has_stream_override(s["icao"]) else ""
+            lines.append(f"{icon} [{i}] {s['icao']} {s['name']}{override}")
         kw = "ON" if state.keywords_enabled else "OFF"
         lines.append(f"\nKeywords: <b>{kw}</b>")
         paused_str = "⏸ Paused" if state.paused else "▶ Running"
         lines.append(f"Status: <b>{paused_str}</b>")
+        lines.append("\nStream URLs:")
+        for s in STREAMS:
+            lines.append(_format_stream_url_line(state, s))
         respond("\n".join(lines))
 
     elif cmd in ("mute", "unmute"):
         want_enabled = cmd == "unmute"
         label = "active" if want_enabled else "muted"
         icon = "✅" if want_enabled else "\U0001f507"
-        if arg == "all":
+        if arg_l == "all":
             for s in STREAMS:
                 state.station_enabled[s["icao"]] = want_enabled
                 _broadcast_station_status(s, want_enabled)
@@ -886,9 +1068,62 @@ def _handle_command(
             if state.display:
                 state.display.refresh()
 
+    elif cmd in ("url", "streamurl"):
+        station = _resolve_station(arg)
+        if station is None:
+            respond(
+                f"Usage: /url <code>YBCG</code>\n"
+                f"Use a number (1–{len(STREAMS)}) or ICAO code."
+            )
+            return
+        respond(_format_stream_url_line(state, station))
+
+    elif cmd in ("urls", "streamurls"):
+        lines = ["\U0001f517 <b>Stream URLs</b>"]
+        for s in STREAMS:
+            lines.append(_format_stream_url_line(state, s))
+        respond("\n".join(lines))
+
+    elif cmd in ("seturl", "stream"):
+        station = _resolve_station(arg)
+        if station is None or not rest:
+            respond(
+                f"Usage: /seturl <code>YBCG</code> <code>https://...</code>\n"
+                f"Use a number (1–{len(STREAMS)}) or ICAO code."
+            )
+            return
+        if not _valid_stream_url(rest):
+            respond("⚠ Stream URL must start with <code>http://</code> or <code>https://</code> and include a host.")
+            return
+        changed = state.set_stream_url(station["icao"], rest)
+        respond(
+            f"\U0001f517 {station['icao']} {station['name']} stream URL "
+            f"{'updated' if changed else 'already set'}.\n"
+            f"<code>{html.escape(rest)}</code>"
+        )
+        tui(f"{source} → {station['icao']} stream URL updated; reconnecting")
+
+    elif cmd in ("reseturl", "resetstream"):
+        station = _resolve_station(arg)
+        if station is None:
+            respond(
+                f"Usage: /reseturl <code>YBCG</code>\n"
+                f"Use a number (1–{len(STREAMS)}) or ICAO code."
+            )
+            return
+        changed = state.reset_stream_url(station["icao"])
+        default_url = state.get_default_stream_url(station["icao"])
+        respond(
+            f"\U0001f504 {station['icao']} {station['name']} stream URL "
+            f"{'restored to default' if changed else 'is already default'}.\n"
+            f"<code>{html.escape(default_url)}</code>"
+        )
+        if changed:
+            tui(f"{source} → {station['icao']} stream URL reset; reconnecting")
+
     elif cmd == "keywords":
-        if arg in ("on", "off"):
-            want = arg == "on"
+        if arg_l in ("on", "off"):
+            want = arg_l == "on"
             with state._lock:
                 state.keywords_enabled = want
             kw_label = "ON" if want else "OFF"
@@ -951,6 +1186,8 @@ def _discord_command_listener(state: SharedState) -> None:
     channel_id = DISCORD_COMMANDS_CHANNEL_ID
     headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
     base_url = f"{_DISCORD_API}/channels/{channel_id}/messages"
+    healthy = True
+    error_count = 0
 
     # Seed last_id from the newest existing message so old command history
     # in #commands isn't replayed on startup.
@@ -982,6 +1219,10 @@ def _discord_command_listener(state: SharedState) -> None:
                 continue
             if resp.status_code != 200:
                 raise RuntimeError(f"HTTP {resp.status_code} {resp.text[:200]}")
+            if not healthy and state.display:
+                state.display.log(Text("✓ Discord command polling recovered", style="dim green"))
+            healthy = True
+            error_count = 0
             msgs = resp.json()
             if isinstance(msgs, list) and msgs:
                 ordered = sorted(msgs, key=lambda m: int(m["id"]))
@@ -998,8 +1239,21 @@ def _discord_command_listener(state: SharedState) -> None:
                 seed_failed = False
         except Exception as exc:
             if not state.stop_event.is_set():
-                if state.display:
-                    state.display.log(Text(f"⚠ Discord poll error: {exc}", style="dim yellow"))
+                error_count += 1
+                delay = min(60.0, 2.5 * (2 ** min(error_count - 1, 5)))
+                if healthy and state.display:
+                    state.display.log(Text(
+                        f"⚠ Discord command polling unavailable: {exc}. Retrying with backoff.",
+                        style="dim yellow",
+                    ))
+                elif error_count in (3, 6) and state.display:
+                    state.display.log(Text(
+                        f"⚠ Discord command polling still unavailable; next retry in {delay:.0f}s",
+                        style="dim yellow",
+                    ))
+                healthy = False
+                state.stop_event.wait(delay)
+                continue
         state.stop_event.wait(2.5)
 
 
@@ -1063,7 +1317,6 @@ def _keyboard_listener(state: SharedState) -> None:
 def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState) -> None:
     icao = stream_cfg["icao"]
     station_name = stream_cfg["name"]
-    url = stream_cfg["url"]
     headers = stream_cfg["headers"]
 
     def tui_log(line: Text) -> None:
@@ -1075,6 +1328,7 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
     while not state.stop_event.is_set():
         source: Optional[LiveATCSource] = None
         try:
+            url, url_version = state.get_stream_url_snapshot(icao)
             source = LiveATCSource(url, headers)
 
             pcm_gen = miniaudio.stream_any(
@@ -1100,8 +1354,13 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
                 _broadcast_stream_status(stream_cfg, connected=True)
                 was_connected = True
 
+            url_changed = False
             for raw_chunk in pcm_gen:
                 if state.stop_event.is_set():
+                    break
+                if state.get_stream_url_version(icao) != url_version:
+                    url_changed = True
+                    tui_log(Text(f"↻ {icao}: stream URL changed — reconnecting", style="cyan"))
                     break
 
                 chunk = np.frombuffer(bytes(raw_chunk), dtype=np.int16).astype(np.float32) / 32768.0
@@ -1131,6 +1390,9 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
                             in_tx = False
                             silence_since = None
 
+            if url_changed:
+                was_connected = False
+
         except Exception as exc:
             if not state.stop_event.is_set():
                 tui_log(Text(f"⚠ {icao}: {exc}", style="red"))
@@ -1138,7 +1400,7 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
                 if was_connected:
                     _broadcast_stream_status(stream_cfg, connected=False, detail=str(exc))
                     was_connected = False
-                time.sleep(RECONNECT_DELAY_SEC)
+                state.stop_event.wait(RECONNECT_DELAY_SEC)
         finally:
             if source:
                 source.close()
@@ -1237,7 +1499,8 @@ def main() -> None:
 
     model = args.model or WHISPER_MODEL
 
-    state = SharedState(keywords_enabled=not args.no_keywords)
+    runtime_config = RuntimeConfig(Path(__file__).parent / "runtime_config.json")
+    state = SharedState(keywords_enabled=not args.no_keywords, runtime_config=runtime_config)
 
     requested = {s.upper() for s in args.stations} if args.stations else None
     for s in STREAMS:
@@ -1270,6 +1533,10 @@ def main() -> None:
     _display_ref = display
 
     with display:
+        global _discord_outbox
+        if config.DISCORD_ENABLED:
+            _discord_outbox = DiscordOutbox()
+
         kb_thread = threading.Thread(
             target=_keyboard_listener, args=(state,), daemon=True, name="keyboard"
         )
@@ -1315,6 +1582,9 @@ def main() -> None:
             state.stop_event.set()
         finally:
             transcriber.shutdown()
+            if _discord_outbox is not None:
+                _discord_outbox.shutdown()
+                _discord_outbox = None
 
     console.print("[dim]Done.[/dim]")
 

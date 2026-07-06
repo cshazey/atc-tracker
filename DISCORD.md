@@ -81,8 +81,14 @@ The connection status message is also **pinned** automatically, replacing the pr
 | `/status` | Show every station's mute state, keyword toggle, pause state |
 | `/mute <N\|ICAO\|all>` | Mute a station (or all) |
 | `/unmute <N\|ICAO\|all>` | Unmute a station (or all) |
+| `/url <N\|ICAO>` | Show the active stream URL for one station |
+| `/urls` | Show all active stream URLs |
+| `/seturl <N\|ICAO> https://...` | Update a station stream URL and reconnect it |
+| `/reseturl <N\|ICAO>` | Restore a station stream URL to the default in `config.py` |
 | `/keywords on\|off` | Toggle terminal keyword highlighting |
 | `/pause` / `/resume` | Suspend/resume transcription & forwarding on every station |
+
+Stream URL changes are saved in `runtime_config.json`, which is local-only and ignored by git, so they survive restarts without editing `config.py`.
 
 Every command reply appears in `#commands`, and any station mute/unmute or global pause/resume also posts a status embed into the affected station channel(s) — this happens regardless of whether the command was typed in Discord or Telegram, so both platforms always agree on current state.
 
@@ -105,3 +111,5 @@ Every command reply appears in `#commands`, and any station mute/unmute or globa
 **Commands not responding (message shows up but bot ignores it):** almost always **Message Content Intent** is off. Developer Portal → your app → **Bot** tab → **Privileged Gateway Intents** → enable **Message Content Intent** → Save. Without this, Discord returns every message's `content` field as an empty string on REST fetches, so the tracker sees `/mute YBCG` as `""` and silently does nothing — there's no error, it just looks like the bot isn't listening.
 
 **Commands not responding at all (nothing happens, not even the above):** confirm the bot can view *and* read history in `#commands` (Read Message History permission — the tracker polls for new messages every ~2.5s, it does not use a live gateway connection).
+
+**Discord/network outage spams the terminal:** the tracker now logs the first command polling failure, backs off up to 60 seconds between retries, then logs once when polling recovers. Transcription and stream reconnects keep running while Discord is unreachable.
