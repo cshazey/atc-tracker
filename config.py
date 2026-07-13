@@ -16,28 +16,31 @@ _HEADERS = {
     "origin": "https://www.liveatc.net",
     "pragma": "no-cache",
     "priority": "u=1, i",
-    "sec-ch-ua": '"Brave";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
+    "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Brave";v="150"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"macOS"',
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
     "sec-fetch-site": "same-site",
     "sec-gpc": "1",
-    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
 }
 
-# Each entry is one monitored ATC feed.
+# Each entry is one monitored ATC feed. "url" is the default liveatc.net edge
+# URL; liveatc rotates which edge host serves a given mount point, so it can
+# be overridden without a code change via STREAM_URL_<ICAO> in .env, or at
+# runtime via the Discord /seturl <ICAO> <url> command (see README.md).
 STREAMS = [
     {
         "icao": "YBCG",
         "name": "Brisbane Centre",
-        "url": "https://s1-fmt2.liveatc.net/ybcg3_centre",
+        "url": "https://s1-bos.liveatc.net/ybcg3_centre",
         "headers": _HEADERS,
     },
     {
         "icao": "YSPT",
         "name": "Southport",
-        "url": "https://s1-bos.liveatc.net/yspt2",
+        "url": "https://s1-fmt2.liveatc.net/yspt2",
         "headers": _HEADERS,
     },
     {
@@ -47,6 +50,9 @@ STREAMS = [
         "headers": _HEADERS,
     },
 ]
+
+for _s in STREAMS:
+    _s["url"] = os.environ.get(f"STREAM_URL_{_s['icao']}", _s["url"])
 
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 
