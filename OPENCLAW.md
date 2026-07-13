@@ -16,8 +16,8 @@ This document explains how the openclaw agent can launch and use the ATC Tracker
 Currently monitored stations:
 | # | ICAO | Name | Feed URL |
 |---|------|------|----------|
-| 1 | YBCG | Brisbane Centre | `https://s1-fmt2.liveatc.net/ybcg3_centre` |
-| 2 | YSPT | Southport | `https://s1-bos.liveatc.net/yspt2` |
+| 1 | YBCG | Brisbane Centre | `https://s1-bos.liveatc.net/ybcg3_centre` |
+| 2 | YSPT | Southport | `https://s1-fmt2.liveatc.net/yspt2` |
 | 3 | YBBN | Brisbane Tower | `https://s1-fmt2.liveatc.net/ybbn7_twr` |
 
 The stream is pre-squelched at source — only actual radio calls produce output.
@@ -45,8 +45,14 @@ DISCORD_CHANNEL_YBCG=
 DISCORD_CHANNEL_YSPT=
 DISCORD_CHANNEL_YBBN=
 
+STREAM_URL_YBCG=
+STREAM_URL_YSPT=
+STREAM_URL_YBBN=
+
 HUGGINGFACE_TOKEN=
 ```
+
+`STREAM_URL_<ICAO>` is optional — LiveATC occasionally rotates which edge host serves a feed, so these let a stale URL be fixed by editing `.env` instead of `config.py`. Leave blank to use the built-in default. A live Discord `/seturl` override (see below) takes precedence over both while active.
 
 `HUGGINGFACE_TOKEN` is required to download Whisper models. Get a free read-only token at https://huggingface.co/settings/tokens.
 
@@ -145,13 +151,13 @@ STREAMS = [
     {
         "icao": "YBCG",
         "name": "Brisbane Centre",
-        "url": "https://s1-fmt2.liveatc.net/ybcg3_centre",
+        "url": "https://s1-bos.liveatc.net/ybcg3_centre",
         "headers": _HEADERS,
     },
     {
         "icao": "YSPT",
         "name": "Southport",
-        "url": "https://s1-bos.liveatc.net/yspt2",
+        "url": "https://s1-fmt2.liveatc.net/yspt2",
         "headers": _HEADERS,
     },
     # paste new station here

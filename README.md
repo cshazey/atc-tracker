@@ -143,15 +143,19 @@ Full walkthrough, permissions, and a per-channel reference are in **[DISCORD.md]
 
 Each station posts only its own transmissions to its own channel; keyword matches also mirror into `#alerts`; `/mute`, `/unmute`, `/pause`, `/resume`, `/keywords`, `/status`, `/url`, `/urls`, `/seturl`, `/reseturl`, `/help` all work from `#commands`, exactly like the Telegram commands below — both platforms stay in sync regardless of which one you send a command from.
 
-### Updating a LiveATC stream URL while running
+### Updating a LiveATC stream URL
 
-If LiveATC changes one of the connection links, send this in `#commands`:
+LiveATC rotates which edge host (`s1-bos`, `s1-fmt2`, etc.) serves a given mount point, so a station's stream can go stale without warning. Two ways to fix it, in order of preference:
+
+**While running, via Discord** — send this in `#commands`:
 
 ```text
 /seturl YBCG https://s1-fmt2.liveatc.net/new-feed-link
 ```
 
 The affected station reconnects using the new URL and the override is saved to `runtime_config.json`, which is local-only and ignored by git. Use `/url YBCG` or `/urls` to check the active URL, and `/reseturl YBCG` to return to the default in `config.py`.
+
+**Permanently, via `.env`** — set `STREAM_URL_<ICAO>`, e.g. `STREAM_URL_YBCG=https://s1-fmt2.liveatc.net/new-feed-link`. This overrides the hardcoded default in `config.py` on every start, without editing code. (A Discord `/seturl` override still takes precedence over both while it's active.)
 
 ---
 
@@ -164,13 +168,13 @@ STREAMS = [
     {
         "icao": "YBCG",
         "name": "Brisbane Centre",
-        "url": "https://s1-fmt2.liveatc.net/ybcg3_centre",
+        "url": "https://s1-bos.liveatc.net/ybcg3_centre",
         "headers": _HEADERS,
     },
     {
         "icao": "YSPT",
         "name": "Southport",
-        "url": "https://s1-bos.liveatc.net/yspt2",
+        "url": "https://s1-fmt2.liveatc.net/yspt2",
         "headers": _HEADERS,
     },
     # Add more here...
