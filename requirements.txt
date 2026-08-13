@@ -5,3 +5,5 @@ numpy>=2.4.0
 rich>=13.8.0
 python-dotenv>=1.0.0
 scipy>=1.11.0
+# Alternate STT backend — used by --stt parakeet and bench_stt.py.
+parakeet-mlx>=0.5.2

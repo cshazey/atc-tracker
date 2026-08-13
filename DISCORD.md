@@ -44,7 +44,7 @@ Discord is active once `DISCORD_BOT_TOKEN`, `DISCORD_ALERTS_CHANNEL_ID`, `DISCOR
 | ctafs | `#ybcg-brisbane-center` | YBCG Brisbane Centre | `DISCORD_CHANNEL_YBCG` |
 | ctafs | `#yspt-southport-ctaf` | YSPT Southport | `DISCORD_CHANNEL_YSPT` |
 | ctafs | `#ybbn-brisbane-center` | YBBN Brisbane Tower | `DISCORD_CHANNEL_YBBN` |
-| alerts | `#alerts` | Every station (keyword matches only) | `DISCORD_ALERTS_CHANNEL_ID` |
+| alerts | `#alerts` | Every station (emergency + interest matches) | `DISCORD_ALERTS_CHANNEL_ID` |
 | admin | `#commands` (private) | — (control channel) | `DISCORD_COMMANDS_CHANNEL_ID` |
 
 ### `#ybcg-brisbane-center` / `#yspt-southport-ctaf` / `#ybbn-brisbane-center`
@@ -52,8 +52,10 @@ Discord is active once `DISCORD_BOT_TOKEN`, `DISCORD_ALERTS_CHANNEL_ID`, `DISCOR
 **Posts when:** every transmission on that station (not just keyword matches).
 **Example:**
 > 📻 **YBCG Brisbane Centre**
-> Golf Bravo Charlie cleared COASTAL two departure runway two eight
-> *14:32:01 AEST / 04:32:01Z*
+> Golf Bravo Charlie cleared runway two eight
+> *14:32:01 AEST / 04:32:01Z · YBCG_143201.wav*
+
+The footer names the saved audio file for that transmission (`recordings/<date>/<ICAO>_<HHMMSS>.wav`), so any transcript can be traced back to what was actually said. Omitted when recording is off.
 
 The timestamp (both the footer text and Discord's own clock-formatted embed timestamp) reflects **when the transmission was received** — i.e. when the radio call ended and VAD flushed the buffer — not when the message was posted. Transcription runs after that, so for a long or queued transmission the actual Discord message can land a little later; the timestamp still reflects the original receipt moment, not the post moment.
 
@@ -62,15 +64,25 @@ Also receives a small status embed whenever:
 - the tracker is globally paused/resumed (via `/pause`/`/resume` or the `P` key)
 - the LiveATC stream connects for the first time, or reconnects after dropping (🟢 Connected / 🔴 Disconnected — only posted on the transition, not on every retry, so a persistently flaky feed doesn't spam the channel)
 
-The connection status message is also **pinned** automatically, replacing the previous pin — so the pinned message in each station channel always reflects current connectivity at a glance. Requires the bot to have **Read Message History** and **Manage Messages** on that channel in addition to Send Messages/Embed Links (pinning needs to read the target message as well as manage the pin itself).
+Connection status uses **one pinned message per channel, created at startup and edited in place** on every subsequent transition. Earlier versions posted and pinned a fresh message each time, which spams the channel and walks into Discord's hard cap of 50 pins per channel over a long event. Requires the bot to have **Read Message History** and **Manage Messages** on that channel in addition to Send Messages/Embed Links (pinning needs to read the target message as well as manage the pin itself).
 
 **Suggested channel topic:** `Live ATC transcript — <ICAO> <Station Name>. Muted/paused/connection status posts here too.`
 
 ### `#alerts`
-**Purpose:** cross-station visibility for anything matching a monitored keyword (MAYDAY, MILITARY, F-18, RESTRICTED, squawk 7700/7600/7500, etc. — see `KEYWORDS` in `config.py`).
-**Posts when:** any station's transmission matches a keyword — mirrors the same transmission that also posted to its own station channel.
-**Visual only:** red-colored embed with a 🔴 KEYWORD ALERT title, no `@here`/role ping (deliberately, to avoid alert fatigue on frequent matches like "500").
-**Suggested channel topic:** `Keyword-match mirror from every station — visual only, no pings.`
+**Purpose:** cross-station visibility for anything matching a monitored keyword. Alerts are **two-tier** — see `KEYWORDS_EMERGENCY` and `KEYWORDS_INTEREST` in `config.py`.
+
+| Tier | Matches | Behaviour |
+|---|---|---|
+| 🚨 Emergency | MAYDAY, PAN PAN, EMERGENCY, squawk 7700/7600/7500, GUARD | Red embed **and an `@here` ping** naming the matched term |
+| 🔴 Interest | Display and military callsigns (HORNET, ROULETTES, F-35, WARBIRD, FORMATION…), RESTRICTED, COASTAL | Orange embed, **no ping** |
+
+**Posts when:** any station's transmission matches — mirrors the same transmission that also posted to its own station channel.
+
+Only the emergency tier pings, deliberately: an airshow weekend generates a constant stream of interest-tier matches, and pinging on all of them would train everyone to ignore the channel. Bare numeric keywords (`"18"`, `"500"`) were removed for the same reason — they fired on every "runway 18" and "500 feet".
+
+Outbound mentions are otherwise suppressed via `allowed_mentions`, so a transcript that happens to contain "@everyone" cannot ping the server.
+
+**Suggested channel topic:** `Alert mirror from every station — @here on emergencies only.`
 
 ### `#commands` (private)
 **Purpose:** bidirectional control, equivalent to the Telegram bot chat.
@@ -87,6 +99,12 @@ The connection status message is also **pinned** automatically, replacing the pr
 | `/reseturl <N\|ICAO>` | Restore a station stream URL to the default in `config.py` |
 | `/keywords on\|off` | Toggle terminal keyword highlighting |
 | `/pause` / `/resume` | Suspend/resume transcription & forwarding on every station |
+| `/health` | Per-station last audio, last TX, reconnect and dropped counts, active URL, transcriber queue depth, gated count, outbox depth |
+| `/reconnect <N\|ICAO>` | Force a station to drop and redial its stream |
+| `/vad <N\|ICAO> [value]` | Show or set that station's VAD threshold live |
+| `/record on\|off` | Toggle saving transmission audio to `recordings/` |
+
+`/health` is the one to reach for mid-event: it tells you whether a quiet station is quiet because there's no traffic (`audio` recent, `last TX` old) or because the feed is dead (`audio` old, `reconnects` climbing).
 
 Stream URL changes are saved in `runtime_config.json`, which is local-only and ignored by git, so they survive restarts without editing `config.py`.
 
