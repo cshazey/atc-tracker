@@ -1,0 +1,4841 @@
+{
+ "source": "https://www.swld.com.au/pages/aus_raaf_callsigns.htm",
+ "exported_at": "2026-08-13T12:42:26+00:00",
+ "callsigns": [
+  {
+   "callsign": "A SQN OAKEY",
+   "prefixes": [
+    "OAKEY",
+    "SQN"
+   ],
+   "aircraft": "C208 / PC12",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "AATES",
+   "prefixes": [
+    "TEST",
+    "AND",
+    "SQN"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "ADDER",
+   "prefixes": [
+    "ADDR"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "3 SQN WILLIAMTOWN",
+   "ops_freq": "324.400",
+   "confirmed": true
+  },
+  {
+   "callsign": "AIR AFFAIRS AUSTRALIA",
+   "prefixes": [
+    "NAVY",
+    "TARGET",
+    "TOWING"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "AIR FORCE",
+   "prefixes": [],
+   "aircraft": "USAF",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "AJAX",
+   "prefixes": [
+    "AJAX"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ALBATROSS",
+   "prefixes": [
+    "ALBT"
+   ],
+   "aircraft": "TRITON MQ-4C UAS",
+   "squadron": "9 SQN EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ALLADIN",
+   "prefixes": [
+    "ALDN"
+   ],
+   "aircraft": "PILATUS PC-21",
+   "squadron": "CFS EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "AMBER",
+   "prefixes": [],
+   "aircraft": "HORNET",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "AMBUSH",
+   "prefixes": [
+    "ABSH"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "AMFTU",
+   "prefixes": [
+    "AND",
+    "FLIGHT",
+    "TRIALS",
+    "UNIT"
+   ],
+   "aircraft": "",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "ANGEL",
+   "prefixes": [
+    "ANGL"
+   ],
+   "aircraft": "A139",
+   "squadron": "B SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ANGRY",
+   "prefixes": [
+    "AGRY"
+   ],
+   "aircraft": "APACHE",
+   "squadron": "161 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ANSON",
+   "prefixes": [],
+   "aircraft": "PC9",
+   "squadron": "CFS EAST SALE",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "APACHE",
+   "prefixes": [
+    "APCE",
+    "APCH",
+    "APCHE"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "3 SQN WILLIAMTOWN",
+   "ops_freq": "376.600",
+   "confirmed": true
+  },
+  {
+   "callsign": "APEX",
+   "prefixes": [
+    "AGRY"
+   ],
+   "aircraft": "APACHE",
+   "squadron": "161 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "APOCALYPSE",
+   "prefixes": [
+    "APOC"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "A SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ARCHER",
+   "prefixes": [
+    "ACHR",
+    "ARCH"
+   ],
+   "aircraft": "HERCULES C130J-30 (FORMATION)",
+   "squadron": "37 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ARMAGEDDON",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "ARMY 5 AVN REGT",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "ARMY",
+   "prefixes": [],
+   "aircraft": "VARIOUS ARMY HELICOPTERS",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "ARROW",
+   "prefixes": [
+    "ARRW"
+   ],
+   "aircraft": "HERCULES C130J-30 (FORMATION)",
+   "squadron": "37 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ASCOT",
+   "prefixes": [],
+   "aircraft": "VARIOUS RAF INTERNATIONAL FLIGHT",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "ASGUARD",
+   "prefixes": [
+    "ASGD"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "HQ 6 AVN REGT HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ASPEN",
+   "prefixes": [
+    "ASPN"
+   ],
+   "aircraft": "H64 (FORMATION)",
+   "squadron": "RSAF OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ASTRA",
+   "prefixes": [
+    "ASTR"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "RAAF CADETS",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ATLAS",
+   "prefixes": [
+    "ATLS"
+   ],
+   "aircraft": "HERCULES, SPARTAN",
+   "squadron": "84 WG RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "AUSSIE",
+   "prefixes": [
+    "ASY"
+   ],
+   "aircraft": "VARIOUS RAAF INTERNATIONAL FLIGHT",
+   "squadron": "VARIOUS - MOSTLY TRANSPORT",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "AVON",
+   "prefixes": [
+    "AVON"
+   ],
+   "aircraft": "CT-4B (TEST FLIGHT FORMATION) / PILATUS PC-21",
+   "squadron": "BFTS TAMWORTH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "AWES OAKEY",
+   "prefixes": [
+    "OAKEY",
+    "ARMY",
+    "SCHOOL"
+   ],
+   "aircraft": "VARIOUS HELO",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BADGER",
+   "prefixes": [
+    "BDGR"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR (RAN OPERATIONS - RAYTHEON)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BALDOCK",
+   "prefixes": [
+    "BLDK"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR (TARGET TUG)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BARKER",
+   "prefixes": [
+    "BARK"
+   ],
+   "aircraft": "ALPHA JET A",
+   "squadron": "ADF CONTRACTOR",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BARON",
+   "prefixes": [
+    "BARN",
+    "BARON"
+   ],
+   "aircraft": "F35 LIGHTNING",
+   "squadron": "3 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BASSETT",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BAYONET",
+   "prefixes": [
+    "BAYN"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "173 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BEAGLE",
+   "prefixes": [
+    "BEGL"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BEAR",
+   "prefixes": [],
+   "aircraft": "SUPER HORNET",
+   "squadron": "6 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BEARCAT",
+   "prefixes": [
+    "BRCT"
+   ],
+   "aircraft": "PILATUS PC-21 (FORMATION)",
+   "squadron": "CFS EAST SALE (ROULETTES)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BERTHA",
+   "prefixes": [],
+   "aircraft": "VARIOUS",
+   "squadron": "21 SQN WILLIAMS (DISBANDED)",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BEUFORT",
+   "prefixes": [
+    "BFRT"
+   ],
+   "aircraft": "KING AIR 350",
+   "squadron": "32 SQN EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BFTS",
+   "prefixes": [
+    "BASIC",
+    "FLYING",
+    "SCHOOL",
+    "BY"
+   ],
+   "aircraft": "CT-4B TRAINER",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BIKPELA",
+   "prefixes": [
+    "BIKP"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "SAA TTW TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BILBY",
+   "prefixes": [],
+   "aircraft": "KING AIR 350",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": false
+  },
+  {
+   "callsign": "BILLIARD",
+   "prefixes": [
+    "BLRD"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "AATES",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BISON",
+   "prefixes": [],
+   "aircraft": "KING AIR 350",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": false
+  },
+  {
+   "callsign": "BLACK",
+   "prefixes": [
+    "BLCK"
+   ],
+   "aircraft": "VARIOUS RAAF MUSEUM (FORMATION)",
+   "squadron": "RAAF MUSEUM",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BLACKBIRD",
+   "prefixes": [
+    "BKBD"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "75 SQN TINDAL",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BLACKCAT",
+   "prefixes": [
+    "BLKT"
+   ],
+   "aircraft": "P-8A POSEIDON",
+   "squadron": "92 WG EDINBURGH 11 SQN EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BLACKDUCK",
+   "prefixes": [
+    "BKDK"
+   ],
+   "aircraft": "KING AIR 350 (FORMATION)",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": true
+  },
+  {
+   "callsign": "BLACKHAWK",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BLACKJACK",
+   "prefixes": [
+    "BCJK"
+   ],
+   "aircraft": "S-70B SEAHAWK / LJ35",
+   "squadron": "816 SQN NAVY NOWRA / ADF CONTRACTOR (STRIKE ROLE)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BLACKKNIGHT",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BLADE",
+   "prefixes": [
+    "BADE"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "162 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BLUE",
+   "prefixes": [],
+   "aircraft": "PC9 / PILATUS PC-21",
+   "squadron": "4 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BOBCAT",
+   "prefixes": [
+    "BBCT"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "76 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BOLT",
+   "prefixes": [
+    "BOLT"
+   ],
+   "aircraft": "F-35 LIGHTNING",
+   "squadron": "LUKE AFB ARIZONA / 3 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BONDI",
+   "prefixes": [
+    "BONDI"
+   ],
+   "aircraft": "C-17 GLOBEMASTER III",
+   "squadron": "36 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BOOMER",
+   "prefixes": [
+    "BOOM"
+   ],
+   "aircraft": "KING AIR 350 (FORMATION)",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": true
+  },
+  {
+   "callsign": "BORDER FORCE",
+   "prefixes": [
+    "BDF"
+   ],
+   "aircraft": "DASH 8",
+   "squadron": "CUSTOMS & BORDER PROTECTION SERVICE SEE CUSTOMS PAGE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BOSUN",
+   "prefixes": [
+    "BOSN"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTACTOR (STRIKE ROLE)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BOXCAR",
+   "prefixes": [],
+   "aircraft": "VARIOUS RAAF",
+   "squadron": "21 SQN WILLIAMS (DISBND)",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BOXKITE",
+   "prefixes": [],
+   "aircraft": "PC9",
+   "squadron": "CFS EAST SALE (ROULETTES)",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BRADY",
+   "prefixes": [
+    "BRADY"
+   ],
+   "aircraft": "HERCULES C-130J",
+   "squadron": "37 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BRAHMAN",
+   "prefixes": [
+    "BRMN"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "C SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BREAKER",
+   "prefixes": [
+    "BRKR"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "AHS OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BREWSTER",
+   "prefixes": [],
+   "aircraft": "HAWK 127",
+   "squadron": "79 SQN PEARCE",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BRIMSTONE",
+   "prefixes": [
+    "BSTN",
+    "BRIM"
+   ],
+   "aircraft": "AIRBUS KC-30A MRTT (FORMATION)",
+   "squadron": "33 SQN AMBERLEY",
+   "ops_freq": "301.500 AERIAL REFUELLING",
+   "confirmed": true
+  },
+  {
+   "callsign": "BROADSWORD",
+   "prefixes": [
+    "BSWD"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "A SQN 5 AVN REGT OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BROLGA",
+   "prefixes": [
+    "BROL"
+   ],
+   "aircraft": "KING AIR 350 (FORMATION) / C208 / PC-12",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED / ARMY GSAS OAKEY",
+   "ops_freq": "392.45",
+   "confirmed": true
+  },
+  {
+   "callsign": "BRONCO",
+   "prefixes": [
+    "BRNC"
+   ],
+   "aircraft": "BLACKHAWK / KING AIR 350 (FORMATION)",
+   "squadron": "ARMY / 38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": true
+  },
+  {
+   "callsign": "BROWN",
+   "prefixes": [],
+   "aircraft": "HORNET",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BRUMBY",
+   "prefixes": [
+    "BRUM"
+   ],
+   "aircraft": "KING AIR 350 (FORMATION)",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": true
+  },
+  {
+   "callsign": "BRUTAL",
+   "prefixes": [
+    "BRUT"
+   ],
+   "aircraft": "EA-18G GROWLER (FORMATION)",
+   "squadron": "6 SQN AMBERLEY",
+   "ops_freq": "395.350",
+   "confirmed": true
+  },
+  {
+   "callsign": "BUCKSHOT",
+   "prefixes": [
+    "BUCK"
+   ],
+   "aircraft": "SUPER HORNET",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "393.700",
+   "confirmed": true
+  },
+  {
+   "callsign": "BUFFALO",
+   "prefixes": [
+    "BFLO"
+   ],
+   "aircraft": "P-8A POSEIDON",
+   "squadron": "EDINBURGH (92 WING)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BUSH",
+   "prefixes": [],
+   "aircraft": "KING AIR 350",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": false
+  },
+  {
+   "callsign": "BUSHMAN",
+   "prefixes": [
+    "BSMN"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "173 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "BUSHMASTER",
+   "prefixes": [],
+   "aircraft": "TIGER",
+   "squadron": "HQ 1 AVN REGT DARWIN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "BUSHRANGER",
+   "prefixes": [
+    "BRGR"
+   ],
+   "aircraft": "KING AIR 350 / TIGER",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED / HQ 1 AVN REGT DARWIN",
+   "ops_freq": "392.45",
+   "confirmed": true
+  },
+  {
+   "callsign": "BUZZARD",
+   "prefixes": [
+    "BZRD"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "75 SQN TINDAL",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CALTEX",
+   "prefixes": [
+    "CLTX"
+   ],
+   "aircraft": "AIRBUS KC-30A TANKER",
+   "squadron": "33 SQN AMBERLRY",
+   "ops_freq": "301.500",
+   "confirmed": true
+  },
+  {
+   "callsign": "CAMEL",
+   "prefixes": [
+    "CAML"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "CFS EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CANNON",
+   "prefixes": [
+    "CANN",
+    "CN"
+   ],
+   "aircraft": "SUPER HORNET (FORMATION)",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "279.800, 315.000, 320.500, 344.100, 362.800",
+   "confirmed": true
+  },
+  {
+   "callsign": "CANTER",
+   "prefixes": [
+    "CANT"
+   ],
+   "aircraft": "C-17 GLOBEMASTER (FORMATION)",
+   "squadron": "36 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CARBINE",
+   "prefixes": [
+    "CARB"
+   ],
+   "aircraft": "SUPER HORNET (FORMATION)",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "279.800, 315.000, 320.500, 344.100, 362.800",
+   "confirmed": true
+  },
+  {
+   "callsign": "CARIBOU",
+   "prefixes": [
+    "CBOU"
+   ],
+   "aircraft": "",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "CARNAGE",
+   "prefixes": [
+    "CRNG"
+   ],
+   "aircraft": "SUPER HORNET (FORMATION)",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "279.800, 315.000, 320.500, 344.100, 362.800",
+   "confirmed": true
+  },
+  {
+   "callsign": "CASTLE",
+   "prefixes": [],
+   "aircraft": "AIRBUS KC-30A TANKER",
+   "squadron": "33 SQN AMBERLRY",
+   "ops_freq": "301.500",
+   "confirmed": false
+  },
+  {
+   "callsign": "CAVALIER",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK / VARIOUS ARMY HELO",
+   "squadron": "HQ 6 AVN REGT HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CAVEMAN",
+   "prefixes": [
+    "CVMN"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "C SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CELTIC",
+   "prefixes": [
+    "CELT"
+   ],
+   "aircraft": "CH47 CHINOOK (FORMATION)",
+   "squadron": "126 SQN RSAF OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CENTRAL",
+   "prefixes": [
+    "CTRL"
+   ],
+   "aircraft": "PILATUS PC-21",
+   "squadron": "CFS EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CENTURION",
+   "prefixes": [
+    "CTRN"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "HQ 6 AVN REGT HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CENTURY",
+   "prefixes": [
+    "CTRY"
+   ],
+   "aircraft": "RAAF MUSEUM",
+   "squadron": "100 SQN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CFS",
+   "prefixes": [
+    "EAST",
+    "SALE",
+    "FLYING"
+   ],
+   "aircraft": "PILATUS PC-21",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "CHAINSAW",
+   "prefixes": [
+    "CHSW"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "C SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CHANNEL",
+   "prefixes": [],
+   "aircraft": "USER",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "CHAOS",
+   "prefixes": [
+    "KAOS"
+   ],
+   "aircraft": "C27J SPARTAN",
+   "squadron": "35 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CHARGER",
+   "prefixes": [
+    "CHGR"
+   ],
+   "aircraft": "C-17 GLOBEMASTER (FORMATION)",
+   "squadron": "36 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CHARLIE",
+   "prefixes": [
+    "CHLE"
+   ],
+   "aircraft": "CT-4B / PILATUS PC-21",
+   "squadron": "BFTS TAMWORTH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CHC",
+   "prefixes": [],
+   "aircraft": "AW139",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "CHECK",
+   "prefixes": [
+    "CHCK"
+   ],
+   "aircraft": "CT-4B / PILATUS PC-21",
+   "squadron": "BFTS TAMWORTH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CHECKER",
+   "prefixes": [
+    "CHKR"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "AATES",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CHEETAH",
+   "prefixes": [
+    "CHET"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "76 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CHIEFTAIN",
+   "prefixes": [
+    "CHIEF"
+   ],
+   "aircraft": "",
+   "squadron": "COMMANDER OF AIR FORCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CHOPPER",
+   "prefixes": [
+    "CHOP"
+   ],
+   "aircraft": "VARIOUS HELO",
+   "squadron": "MILITARY SEARCH AND RESCUE - CONTRACTOR",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CLASSIC",
+   "prefixes": [
+    "CLAS",
+    "CLSC"
+   ],
+   "aircraft": "HORNET",
+   "squadron": "75 SQN TINDAL",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CLAW",
+   "prefixes": [],
+   "aircraft": "SUPER HORNET",
+   "squadron": "6 SQN AMBERLEY",
+   "ops_freq": "395.350",
+   "confirmed": false
+  },
+  {
+   "callsign": "CLAYMORE",
+   "prefixes": [
+    "CLAY"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "173 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "COBRA",
+   "prefixes": [
+    "CBRA",
+    "COBRA",
+    "COBR"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION) / VARIOUS NAVY",
+   "squadron": "3 SQN WILLIAMTOWN / NAVY AMFTU",
+   "ops_freq": "324.400",
+   "confirmed": true
+  },
+  {
+   "callsign": "COBWEB",
+   "prefixes": [],
+   "aircraft": "LEARJET - NOW OUTSOURCED/PRIVATE CONTRACTOR",
+   "squadron": "NAVY CONTRACTOR",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "CODE",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "808 SQN NAVY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "COLT",
+   "prefixes": [
+    "COLT"
+   ],
+   "aircraft": "SUPER HORNET (FORMATION)",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "279.800, 315.000, 320.500, 344.100, 362.800",
+   "confirmed": true
+  },
+  {
+   "callsign": "CONCORDE",
+   "prefixes": [
+    "CNCD"
+   ],
+   "aircraft": "CH47 CHINOOK (FORMATION)",
+   "squadron": "126 SQN RSAF OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CONDOR",
+   "prefixes": [
+    "CNDR"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "75 SQN TINDAL",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CONSORT",
+   "prefixes": [
+    "CNST"
+   ],
+   "aircraft": "BBJ / CHALLENGER 604 VIP FALCON 7X",
+   "squadron": "34 SQN FAIRBAIRN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CORMORANT",
+   "prefixes": [
+    "CORM"
+   ],
+   "aircraft": "C208 / PC-12",
+   "squadron": "ARMY GSAS OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CORSAIR",
+   "prefixes": [
+    "COSR"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "CFS EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "COUGAR",
+   "prefixes": [
+    "COGR"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "76 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "COWBOY",
+   "prefixes": [
+    "CWBY"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "A SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CROWBAR",
+   "prefixes": [
+    "CRBR",
+    "CROW"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR (RAAF OPERATIONS - RAYTHEON)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CROWE",
+   "prefixes": [
+    "CROW"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "SAA TTW TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CRUISER",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "CRUSADER",
+   "prefixes": [
+    "CDER"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "SAA OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CURLEW",
+   "prefixes": [
+    "CURL"
+   ],
+   "aircraft": "C208 / PC-12",
+   "squadron": "ARMY GSAS OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CUTLASS",
+   "prefixes": [
+    "CUTL"
+   ],
+   "aircraft": "BLACKHAWK / EA18G GROWLER (FORMATION)",
+   "squadron": "808 SQN NOWRA / 6 SQN AMBERLEY",
+   "ops_freq": "395.350",
+   "confirmed": true
+  },
+  {
+   "callsign": "CYCLONE",
+   "prefixes": [
+    "CYC",
+    "CYCN",
+    "CYCL"
+   ],
+   "aircraft": "PC-21 TRAINER (FORMATION) / CT-4B / PILATUS PC-21 (FORMATION)",
+   "squadron": "130 SQN RSAF (PEARCE) / BFTS TAMWORTH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CYCLOPS",
+   "prefixes": [
+    "CYCP"
+   ],
+   "aircraft": "CH47 CHINOOK (FORMATION)",
+   "squadron": "126 SQN RSAF OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "CYGNET",
+   "prefixes": [
+    "CYGT"
+   ],
+   "aircraft": "PILATUS PC-21 (STUDENT SOLO)",
+   "squadron": "1FTS EAST SALE 2FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DAGGER",
+   "prefixes": [
+    "DAGR"
+   ],
+   "aircraft": "",
+   "squadron": "FTS & VARIOUS SQN FAC",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "DASH",
+   "prefixes": [],
+   "aircraft": "SUPER HORNET",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "279.800, 315.000, 320.500, 344.100, 362.800",
+   "confirmed": false
+  },
+  {
+   "callsign": "DEADLY",
+   "prefixes": [
+    "DEDY"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "161 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DEEP-V",
+   "prefixes": [
+    "DPVU"
+   ],
+   "aircraft": "RAYTHEON 1900D",
+   "squadron": "ADF CONTRACTOR (DSTO TASKING)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DEFENCE",
+   "prefixes": [],
+   "aircraft": "VARIOUS A/C - TESTING",
+   "squadron": "AWC EDINBURGH",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "DELTA",
+   "prefixes": [
+    "DELTA",
+    "DLTA"
+   ],
+   "aircraft": "VARIOUS A/C - TESTING (CONFIRMED PC-9) (FORMATION)",
+   "squadron": "AWC EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DEMON",
+   "prefixes": [
+    "DEMN"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "82 WG AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DESPOT",
+   "prefixes": [
+    "DPOT",
+    "DSPT"
+   ],
+   "aircraft": "HORNET",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DESTRIER",
+   "prefixes": [
+    "DEST"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "A SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DEVIL",
+   "prefixes": [
+    "DEVL",
+    "DEVIL"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "79 SQN PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DIAMOND",
+   "prefixes": [
+    "DIAM"
+   ],
+   "aircraft": "AS532 COUGAR",
+   "squadron": "126 SQN RSAF OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DINGO",
+   "prefixes": [
+    "DNGO"
+   ],
+   "aircraft": "KING AIR 350",
+   "squadron": "32 SQN EAST SALE",
+   "ops_freq": "392.45",
+   "confirmed": true
+  },
+  {
+   "callsign": "DIRK",
+   "prefixes": [],
+   "aircraft": "WINJEEL - OBSOLETE",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "DISCO",
+   "prefixes": [
+    "DSCO"
+   ],
+   "aircraft": "BLACKHAWK / MRH-90",
+   "squadron": "171 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DIVER",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "DOGTAIL",
+   "prefixes": [
+    "DGTL"
+   ],
+   "aircraft": "WEDGETAIL",
+   "squadron": "2 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DRAGGIE",
+   "prefixes": [
+    "DRAG"
+   ],
+   "aircraft": "KING AIR 350 (FORMATION)",
+   "squadron": "32 SQN EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DRAGON",
+   "prefixes": [
+    "DRGN"
+   ],
+   "aircraft": "AIRBUS KC-30A MRTT",
+   "squadron": "33 SQN AMBERLEY",
+   "ops_freq": "301.500 AERIAL REFUELLING",
+   "confirmed": true
+  },
+  {
+   "callsign": "DRIFTER",
+   "prefixes": [
+    "DRFT"
+   ],
+   "aircraft": "MH-60R SEAHAWK",
+   "squadron": "816 SQN NAVY NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DROPBEAR",
+   "prefixes": [
+    "DPBR"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "A SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DROVER",
+   "prefixes": [
+    "DOVR"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "162 SQN ARMY DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DUGITE",
+   "prefixes": [
+    "DUGT"
+   ],
+   "aircraft": "PILATUS PC-21",
+   "squadron": "2FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DUKE",
+   "prefixes": [
+    "DUKE"
+   ],
+   "aircraft": "BLACKHAWK / MRH-90",
+   "squadron": "171 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "DUSTOFF",
+   "prefixes": [],
+   "aircraft": "VARIOUS HELO",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "EAGLE",
+   "prefixes": [
+    "EG",
+    "EGLE"
+   ],
+   "aircraft": "BLACKHAWK / PC-21 TRAINER",
+   "squadron": "NOWRA / 130 SQN RSAF (PEARCE)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "EAGLE OPS",
+   "prefixes": [],
+   "aircraft": "AIR OPERATIONS COMMAND (BASED IN A WEDGETAIL)",
+   "squadron": "2 SQN WILLIAMTOWN",
+   "ops_freq": "MHFCS HF VCN3",
+   "confirmed": true
+  },
+  {
+   "callsign": "EASY",
+   "prefixes": [
+    "EASY"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "SAA TTW TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "EIGHTBALL",
+   "prefixes": [
+    "EBAL"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "AATES",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "EMBER",
+   "prefixes": [
+    "EMBR"
+   ],
+   "aircraft": "PILATUS PC-21",
+   "squadron": "HQ AIR TRAINING WING (ATW) EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "EMPIRE",
+   "prefixes": [
+    "EMPR"
+   ],
+   "aircraft": "F35",
+   "squadron": "81 WG WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "EMU",
+   "prefixes": [
+    "EMYU"
+   ],
+   "aircraft": "KING AIR 350 / BELL 429 / EC135",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED / 723 SQN NAVY NOWRA",
+   "ops_freq": "392.45",
+   "confirmed": true
+  },
+  {
+   "callsign": "ENFIELD",
+   "prefixes": [
+    "ENFD"
+   ],
+   "aircraft": "BLACKHAWK / KING AIR 350",
+   "squadron": "173 AVN SQN HOLSWORTHY / 38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": true
+  },
+  {
+   "callsign": "ENIGMA",
+   "prefixes": [
+    "ENGA"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR (RAYTHEON)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ENVOY",
+   "prefixes": [
+    "EVY"
+   ],
+   "aircraft": "BBJ / CHALLENGER 604 VIP FALCON 7X",
+   "squadron": "34 SQN FAIRBAIRN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "EUREKA",
+   "prefixes": [
+    "ERKA"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "78 WG WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "EWOK",
+   "prefixes": [
+    "EWOK"
+   ],
+   "aircraft": "AP-3C ORION",
+   "squadron": "10 SQN / 292 SQN?",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "FAIRWAY",
+   "prefixes": [
+    "FWAY"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "HQ AIR COMBAT GROUP (ACG) WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "FALCON",
+   "prefixes": [
+    "FALC",
+    "FALCN"
+   ],
+   "aircraft": "EA18G GROWLER",
+   "squadron": "6 SQN AMBERLEY",
+   "ops_freq": "395.350",
+   "confirmed": true
+  },
+  {
+   "callsign": "FANG",
+   "prefixes": [],
+   "aircraft": "EA18G GROWLER",
+   "squadron": "6 SQN AMBERLEY",
+   "ops_freq": "395.350",
+   "confirmed": false
+  },
+  {
+   "callsign": "FARMER",
+   "prefixes": [
+    "FARM"
+   ],
+   "aircraft": "IAI - 1124 WESTWIND",
+   "squadron": "PEL-AIR EXPRESS (RAN CONTRACTOR - NOWRA)",
+   "ops_freq": "VH-KNS VH-KNU",
+   "confirmed": false
+  },
+  {
+   "callsign": "FATBOY",
+   "prefixes": [
+    "FTBY"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "C SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "FELINE",
+   "prefixes": [],
+   "aircraft": "NAVY HELO",
+   "squadron": "?? POSSIBLY 725 OR 816 SQN RAN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "FELINE OPS",
+   "prefixes": [],
+   "aircraft": "11 SQN EDINBURGH HQ",
+   "squadron": "11 SQN EDINBURGH",
+   "ops_freq": "MHFCS",
+   "confirmed": true
+  },
+  {
+   "callsign": "FENCER",
+   "prefixes": [
+    "FNCR"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR (FIGHTER ROLE)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "FINCH",
+   "prefixes": [
+    "FNCH"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "AHS OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "FIREBIRD",
+   "prefixes": [],
+   "aircraft": "HAWK 127",
+   "squadron": "76 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "FIRETAIL",
+   "prefixes": [
+    "FRTL"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "AHS OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "FISHBED",
+   "prefixes": [
+    "FBED"
+   ],
+   "aircraft": "LJ35 / ALPHA JET A",
+   "squadron": "ADF CONTRACTOR (FIGHTER ROLE)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "FLASHLIGHT",
+   "prefixes": [
+    "FLGT"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "1FTS EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "FLOGGER",
+   "prefixes": [
+    "FLOG"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR (FIGHTER ROLE)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "FOXTROT",
+   "prefixes": [],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "C SQN 5 AVN REGT ARMY TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "FRESCO",
+   "prefixes": [
+    "FRSC"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR (FIGHTER ROLE)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "FURY",
+   "prefixes": [
+    "FURY"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "79 SQN PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "GARRET",
+   "prefixes": [
+    "GART"
+   ],
+   "aircraft": "CT-4B / PILATUS PC-21 (FORMATION)",
+   "squadron": "BFTS TAMWORTH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "GASSER",
+   "prefixes": [
+    "GASR"
+   ],
+   "aircraft": "AIRBUS KC-30A MRTT",
+   "squadron": "33 SQN AMBERLEY",
+   "ops_freq": "301.500 AERIAL REFUELLING",
+   "confirmed": true
+  },
+  {
+   "callsign": "GAUL",
+   "prefixes": [
+    "GAUL"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "808 SQN NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "GAUNTLET",
+   "prefixes": [
+    "GLET"
+   ],
+   "aircraft": "MH-60R SEAHAWK ROMEO",
+   "squadron": "725 SQN NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "GHOST",
+   "prefixes": [
+    "GHST"
+   ],
+   "aircraft": "HAWK 127 (FORMATION) / APACHE",
+   "squadron": "79 SQN PEARCE / 161 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "GOLD",
+   "prefixes": [],
+   "aircraft": "HORNET",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "GOSHAWK",
+   "prefixes": [
+    "GHWK"
+   ],
+   "aircraft": "",
+   "squadron": "HQ AIR COMBAT GROUP (ACG) WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "GREEN",
+   "prefixes": [],
+   "aircraft": "HORNET",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "GRIFFIN",
+   "prefixes": [
+    "GRFN"
+   ],
+   "aircraft": "CT-4B / PILATUS PC-21(FORMATION) / TIGER",
+   "squadron": "BFTS TAMWORTH / HQ 1 AVN REGT DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "GRUMPY",
+   "prefixes": [],
+   "aircraft": "TIGER",
+   "squadron": "1ST AV RGT ARMY DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "GYPSY",
+   "prefixes": [
+    "GYPS",
+    "GPSY"
+   ],
+   "aircraft": "CT-4B / PILATUS PC-21(FORMATION)",
+   "squadron": "BFTS TAMWORTH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HALO",
+   "prefixes": [
+    "HALO"
+   ],
+   "aircraft": "A139",
+   "squadron": "B SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HARRIER",
+   "prefixes": [
+    "HARR"
+   ],
+   "aircraft": "CT-4B (FLIGHT SCREENING) / BLACKHAWK",
+   "squadron": "RSAF TAMWORTH / ARMY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HAT-TRICK",
+   "prefixes": [
+    "HTRK"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "808 SQN NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HAVOC",
+   "prefixes": [
+    "HVOC"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "162 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HAWK",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "HAWKEYE",
+   "prefixes": [
+    "HEYE"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "256.500 282.500",
+   "confirmed": true
+  },
+  {
+   "callsign": "HEIMDAL",
+   "prefixes": [
+    "HEIM"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "HQ 6 AVN REGT HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HELLCAT",
+   "prefixes": [
+    "HLLCT"
+   ],
+   "aircraft": "SUPER HORNET",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "HELMUT",
+   "prefixes": [
+    "HLMT"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "82 WG AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HERITAGE",
+   "prefixes": [
+    "HRTG",
+    "HTGPRT"
+   ],
+   "aircraft": "RAAF MUSEUM",
+   "squadron": "100 SQN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HERO",
+   "prefixes": [],
+   "aircraft": "HAWK 127",
+   "squadron": "25 SQN/79 SQN PEARCE",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "HI-EDGE",
+   "prefixes": [
+    "HIDG"
+   ],
+   "aircraft": "RAYTHEON 1900D",
+   "squadron": "ADF CONTRACTOR (ADF TASKING)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HIGHRISE",
+   "prefixes": [
+    "HIRS"
+   ],
+   "aircraft": "WEDGETAIL",
+   "squadron": "2 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HIPSHOT",
+   "prefixes": [
+    "HPST"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "254.800 256.500 282.500",
+   "confirmed": true
+  },
+  {
+   "callsign": "HOGAN",
+   "prefixes": [],
+   "aircraft": "C-17 GLOBEMASTER III",
+   "squadron": "36 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HOMBURG",
+   "prefixes": [
+    "HOBG"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "256.500 282.500 336.000",
+   "confirmed": true
+  },
+  {
+   "callsign": "HOODOO",
+   "prefixes": [
+    "HDDO"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "256.500 282.500 382.000",
+   "confirmed": true
+  },
+  {
+   "callsign": "HOOKER",
+   "prefixes": [
+    "HKER"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "C SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HORNET",
+   "prefixes": [
+    "HORN"
+   ],
+   "aircraft": "ARMY / F35 LIGHTNING (FORMATION)",
+   "squadron": "ARMY / 2 OCU WILLIAMTOWN",
+   "ops_freq": "256.500 282.500 382.000",
+   "confirmed": true
+  },
+  {
+   "callsign": "HOTFOOT",
+   "prefixes": [
+    "HTFT"
+   ],
+   "aircraft": "F35 (FORMATION)",
+   "squadron": "81 WG WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HOWLETTE",
+   "prefixes": [
+    "HLTE"
+   ],
+   "aircraft": "KING AIR 350 (FORMATION)",
+   "squadron": "32 SQN EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HQ 1 AVN REGT",
+   "prefixes": [
+    "DARWIN"
+   ],
+   "aircraft": "TIGER / APACHE",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "HQ 16 AVN BDE",
+   "prefixes": [],
+   "aircraft": "VARIOUS HELO",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "HQ AAVNTC OAKEY",
+   "prefixes": [
+    "OAKEY",
+    "ARMY",
+    "CENTRE"
+   ],
+   "aircraft": "VARIOUS HELO",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "HQ AVNCOMD OAKEY",
+   "prefixes": [
+    "OAKEY",
+    "ARMY"
+   ],
+   "aircraft": "VARIOUS HELO",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "HUDSON",
+   "prefixes": [
+    "HDSN"
+   ],
+   "aircraft": "KING AIR 350",
+   "squadron": "32 SQN EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HUNTER",
+   "prefixes": [
+    "HUTR"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "256.500 282.500 336.000",
+   "confirmed": true
+  },
+  {
+   "callsign": "HUNTSMAN",
+   "prefixes": [
+    "HTMN"
+   ],
+   "aircraft": "",
+   "squadron": "HQ AIR COMMAND GLENBROOK",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HUSKY",
+   "prefixes": [
+    "HUSK"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "HQ 16 AVN BDE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HUSTLER",
+   "prefixes": [
+    "HSLR"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "B SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "HYDRANT",
+   "prefixes": [
+    "HYDT"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "256.500 282.500 336.000",
+   "confirmed": true
+  },
+  {
+   "callsign": "IRON",
+   "prefixes": [],
+   "aircraft": "KING AIR 350",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": false
+  },
+  {
+   "callsign": "IROQUOIS",
+   "prefixes": [],
+   "aircraft": "IROQUOIS -OBSOLETE",
+   "squadron": "ARMY - OBSOLETE",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "JACKAL",
+   "prefixes": [
+    "JAKL"
+   ],
+   "aircraft": "A139",
+   "squadron": "B SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "JACKSON",
+   "prefixes": [],
+   "aircraft": "VARIOUS HELO",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "JOEY",
+   "prefixes": [
+    "JOEY"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "RAAF CADETS",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "JUDGE",
+   "prefixes": [
+    "JUDG"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "171 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "JUSTICE",
+   "prefixes": [
+    "JUST"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "171 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "KELPIE",
+   "prefixes": [
+    "KELPI",
+    "KLPE"
+   ],
+   "aircraft": "HORNET",
+   "squadron": "75 SQN TINDAL",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "KESTREL",
+   "prefixes": [
+    "KSTL"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "HQ AVNCMD OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "KEYSTONE",
+   "prefixes": [
+    "KSTN"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "AWES OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "KING",
+   "prefixes": [],
+   "aircraft": "NONE",
+   "squadron": "1 FTS - DISBANDED",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "KIOWA",
+   "prefixes": [],
+   "aircraft": "KIOWA",
+   "squadron": "ARMY / NAVY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "KIWI",
+   "prefixes": [
+    "KIW",
+    "KIWI"
+   ],
+   "aircraft": "RNZAF",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "KIWI GOLD",
+   "prefixes": [],
+   "aircraft": "RNZAF FORMATION",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "KIWI RED",
+   "prefixes": [],
+   "aircraft": "RNZAF FORMATION",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "KIWI SILVER",
+   "prefixes": [],
+   "aircraft": "RNZAF FORMATION",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "KNIGHT(S)",
+   "prefixes": [
+    "KNGT"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "SAA OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "KONGO",
+   "prefixes": [
+    "KNGO"
+   ],
+   "aircraft": "HERCULES C130J-30 (FORMATION)",
+   "squadron": "285 SQN RICHMOND - DISBANDED 2017",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "KOPIS",
+   "prefixes": [
+    "KOPS"
+   ],
+   "aircraft": "BLACKHAWK / MRH-90",
+   "squadron": "171 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "KRAKEN",
+   "prefixes": [
+    "KRKN"
+   ],
+   "aircraft": "RAYTHEON RAAF OPS / BLACKHAWK",
+   "squadron": "RAYTHEON RAAF OPS / A SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "LADS",
+   "prefixes": [
+    "LASER",
+    "DEPTH"
+   ],
+   "aircraft": "DASH 8-200",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "LAMBDA",
+   "prefixes": [
+    "LMDA"
+   ],
+   "aircraft": "TEST FLIGHT (FORMATION)",
+   "squadron": "ARDU EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "LANCER",
+   "prefixes": [
+    "LNCR"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "3 SQN WILLIAMTOWN",
+   "ops_freq": "324.400",
+   "confirmed": true
+  },
+  {
+   "callsign": "LANTERN",
+   "prefixes": [
+    "LTRN"
+   ],
+   "aircraft": "PILATUS PC-21",
+   "squadron": "1FTS EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "LEGION",
+   "prefixes": [
+    "LGON"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "SAA OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "LEOPARD",
+   "prefixes": [
+    "LEPD"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "76 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "LIBERTY",
+   "prefixes": [
+    "LBTY"
+   ],
+   "aircraft": "A139",
+   "squadron": "B SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "LIFTER",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "LIGHTNING",
+   "prefixes": [
+    "LIG",
+    "LIGT",
+    "LTNG"
+   ],
+   "aircraft": "PC-21 TRAINER (FORMATION) / F-35",
+   "squadron": "130 SQN RSAF (PEARCE) / TRAINING/DEVELOPMENT",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "LION",
+   "prefixes": [],
+   "aircraft": "HORNET",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "LODY",
+   "prefixes": [
+    "LODY"
+   ],
+   "aircraft": "VARIOUS HELO",
+   "squadron": "ADF CONTRACTOR (SAR & TRAINING)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "LYNX",
+   "prefixes": [
+    "LYNX"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "76 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "LYREBIRD",
+   "prefixes": [
+    "LYBD"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR (RAYTHEON)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MADCOW",
+   "prefixes": [
+    "MDCW"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "C SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MAGIC",
+   "prefixes": [
+    "MGIC"
+   ],
+   "aircraft": "A139",
+   "squadron": "B SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MAGNUM",
+   "prefixes": [],
+   "aircraft": "SUPER HORNET",
+   "squadron": "82 WING AMBERLEY",
+   "ops_freq": "316.200",
+   "confirmed": false
+  },
+  {
+   "callsign": "MAGPIE",
+   "prefixes": [
+    "MPIE"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "75 SQN TINDAL",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MAMBA",
+   "prefixes": [
+    "MAMB"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "3 SQN WILLIAMTOWN",
+   "ops_freq": "324.400",
+   "confirmed": true
+  },
+  {
+   "callsign": "MAMBO",
+   "prefixes": [
+    "MAMBO"
+   ],
+   "aircraft": "HERCULES C-130J",
+   "squadron": "37 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MANTA",
+   "prefixes": [],
+   "aircraft": "KING AIR 350",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": false
+  },
+  {
+   "callsign": "MAPLE",
+   "prefixes": [
+    "MAPL",
+    "MPLE"
+   ],
+   "aircraft": "HORNET",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "256.500 282.500 336.000",
+   "confirmed": true
+  },
+  {
+   "callsign": "MARINER",
+   "prefixes": [
+    "MRNR"
+   ],
+   "aircraft": "P-8 POSEIDON",
+   "squadron": "292 SQN (OCU) EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MARLIN",
+   "prefixes": [
+    "MRLN"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "162 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MARSHAL",
+   "prefixes": [],
+   "aircraft": "HORNET",
+   "squadron": "3 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "MAVERICK",
+   "prefixes": [],
+   "aircraft": "HERCULES C130-H - OBSOLETE",
+   "squadron": "37 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "MAYHEM",
+   "prefixes": [
+    "MAYHEM",
+    "MYHM"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "4 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MEDUSA",
+   "prefixes": [
+    "MDSA"
+   ],
+   "aircraft": "BELL 429 / EC135",
+   "squadron": "723 SQN NAVY NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MENTOR",
+   "prefixes": [
+    "MNTR",
+    "MENT"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21 / HERCULES C130J-30",
+   "squadron": "CFS EAST SALE / 285 SQN RICHMOND - DISBANDED 2017",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MERLIN",
+   "prefixes": [
+    "MERL",
+    "MERLIN"
+   ],
+   "aircraft": "CT-4B / PILATUS PC-21(FORMATION)",
+   "squadron": "BFTS TAMWORTH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MIDNIGHT",
+   "prefixes": [
+    "MDNT"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "808 SQN NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MINOR",
+   "prefixes": [],
+   "aircraft": "HAWK 127",
+   "squadron": "25 / 79 SQN PEARCE",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "MIRAGE",
+   "prefixes": [
+    "MIRG"
+   ],
+   "aircraft": "",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "MITCHELL",
+   "prefixes": [
+    "MTCH",
+    "MITCH"
+   ],
+   "aircraft": "WEDGETGAIL",
+   "squadron": "2 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MOHAWK",
+   "prefixes": [
+    "MHWK"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "162 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MONARCH",
+   "prefixes": [
+    "MRCH"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "AHS OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MONGREL",
+   "prefixes": [
+    "MNGL"
+   ],
+   "aircraft": "C27J SPARTAN (FORMATION)",
+   "squadron": "35 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MONSOON",
+   "prefixes": [
+    "MONS",
+    "MON"
+   ],
+   "aircraft": "PC-21 TRAINER (FORMATION)",
+   "squadron": "130 SQN RSAF (PEARCE)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "MUSTANG",
+   "prefixes": [
+    "MUST"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "CFS EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "NADZAB",
+   "prefixes": [
+    "NDZB"
+   ],
+   "aircraft": "CASA 212",
+   "squadron": "ADF CONTRACTOR (PARACHUTE TRAINING SCHOOL)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "NAMARRKON",
+   "prefixes": [
+    "NMKN"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "HQ 1 AVN REGT DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "NAVY",
+   "prefixes": [],
+   "aircraft": "VARIOUS RAN",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "NAVY SURVEY",
+   "prefixes": [],
+   "aircraft": "DASH 8-200 LADS",
+   "squadron": "LADS HMAS CAIRNS",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "NEMESIS",
+   "prefixes": [
+    "NEMS"
+   ],
+   "aircraft": "BLACKHAWK / MRH-90",
+   "squadron": "171 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "NEPTUNE",
+   "prefixes": [
+    "NPTN"
+   ],
+   "aircraft": "AP-3C ORION",
+   "squadron": "92 WG EDINBURGH 10 SQN EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "NIGHT",
+   "prefixes": [
+    "NIGHT"
+   ],
+   "aircraft": "AIRBUS KC-30A TANKER",
+   "squadron": "33 SQN AMBERLEY",
+   "ops_freq": "301.500",
+   "confirmed": true
+  },
+  {
+   "callsign": "NIGHTHAWK",
+   "prefixes": [
+    "NTHK"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "162 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "NIGHTMARE",
+   "prefixes": [
+    "NTMR"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "162 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "NIKE",
+   "prefixes": [],
+   "aircraft": "SUPER HORNET",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "279.800, 315.000, 320.500, 344.100, 362.800",
+   "confirmed": false
+  },
+  {
+   "callsign": "NOSTALGIA",
+   "prefixes": [],
+   "aircraft": "RAAF MUSEUM",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "ODIN",
+   "prefixes": [
+    "ODIN"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ODYSSEY",
+   "prefixes": [
+    "ODSY"
+   ],
+   "aircraft": "HERCULES C130J-30 (FORMATION)",
+   "squadron": "37 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "OGGY",
+   "prefixes": [],
+   "aircraft": "SUPER HORNET",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "279.800, 315.000, 320.500, 344.100, 362.800",
+   "confirmed": false
+  },
+  {
+   "callsign": "OMEGA",
+   "prefixes": [
+    "OMGA"
+   ],
+   "aircraft": "TEST FLIGHT (FORMATION)",
+   "squadron": "ARDU EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "OPAL",
+   "prefixes": [
+    "OPAL"
+   ],
+   "aircraft": "EC25 (FORMATION)",
+   "squadron": "126 SQN RSAF OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ORCA",
+   "prefixes": [
+    "ORCA"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "808 SQN NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ORION",
+   "prefixes": [
+    "OMEN"
+   ],
+   "aircraft": "VARIOUS UAV",
+   "squadron": "822X SQN NAVY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "OUTBACK",
+   "prefixes": [
+    "OBAK"
+   ],
+   "aircraft": "WEDGETAIL (MISSION CREW)",
+   "squadron": "2 SQN WILMTWN/TINDAL",
+   "ops_freq": "MHFCS VCN 3",
+   "confirmed": true
+  },
+  {
+   "callsign": "OUTLAW",
+   "prefixes": [
+    "OTLW"
+   ],
+   "aircraft": "APACHE",
+   "squadron": "161 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "OVERLORD",
+   "prefixes": [
+    "OVER"
+   ],
+   "aircraft": "APACHE",
+   "squadron": "161 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "OXFORD",
+   "prefixes": [
+    "OXFD"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "CFS EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PACER",
+   "prefixes": [
+    "PACR"
+   ],
+   "aircraft": "C-17 GLOBEMASTER (FORMATION)",
+   "squadron": "36 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PACK",
+   "prefixes": [],
+   "aircraft": "VARIOUS RAAF",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "PANTHER",
+   "prefixes": [
+    "PTHR"
+   ],
+   "aircraft": "HAWK 127",
+   "squadron": "76 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PATRIOT",
+   "prefixes": [
+    "PATR"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "SAA TTW TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PEGASUS",
+   "prefixes": [
+    "PEGS"
+   ],
+   "aircraft": "BLACKHAWK/CH47/A139",
+   "squadron": "HQ 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PELAIR",
+   "prefixes": [
+    "SEE",
+    "WIKI"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "PHALANX",
+   "prefixes": [
+    "PHLX"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "171 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PHANTOM",
+   "prefixes": [
+    "PHTM"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "79 SQN PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PHAT",
+   "prefixes": [
+    "PHAT"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "82 WG AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PHOENIX",
+   "prefixes": [
+    "PHNX"
+   ],
+   "aircraft": "HAWK 127",
+   "squadron": "79 SQN PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PIRATE",
+   "prefixes": [
+    "PRTE"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PISTOL",
+   "prefixes": [
+    "PSTL"
+   ],
+   "aircraft": "SUPER HORNET (FORMATION)",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "279.800, 315.000, 320.500, 344.100, 362.800",
+   "confirmed": true
+  },
+  {
+   "callsign": "PORTER",
+   "prefixes": [],
+   "aircraft": "ARMY",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "POSEIDON",
+   "prefixes": [
+    "PSDN"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "808 SQN NOWRA/ (SHARED WITH 5 AVN REGT ARMY)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "POSSUM",
+   "prefixes": [
+    "PSSM"
+   ],
+   "aircraft": "APACHE",
+   "squadron": "161 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PREACHER",
+   "prefixes": [
+    "PRER"
+   ],
+   "aircraft": "WEDGETAIL",
+   "squadron": "2 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PRODIGY",
+   "prefixes": [
+    "PRDG"
+   ],
+   "aircraft": "A139",
+   "squadron": "B SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PROPHET",
+   "prefixes": [
+    "PRPH"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "171 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "PUMA",
+   "prefixes": [
+    "PUMA"
+   ],
+   "aircraft": "GROWLER / HAWK 127 (FORMATION)",
+   "squadron": "6 SQN AMBERLEY / 76 SQN WILLIAMTOWN",
+   "ops_freq": "395.350, 393.700",
+   "confirmed": true
+  },
+  {
+   "callsign": "QUICKSLIVER",
+   "prefixes": [],
+   "aircraft": "RQ-7B",
+   "squadron": "20 STA ENOGGERA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "RAIDER",
+   "prefixes": [
+    "RADR",
+    "RAIDR"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "3 SQN WILLIAMTOWN",
+   "ops_freq": "238.800",
+   "confirmed": true
+  },
+  {
+   "callsign": "RAKE",
+   "prefixes": [
+    "RAKE"
+   ],
+   "aircraft": "PILATUS PC-21 (FORMATION)",
+   "squadron": "4 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "RAMP",
+   "prefixes": [],
+   "aircraft": "SUPER HORNET",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "279.800, 315.000, 320.500, 344.100, 362.800",
+   "confirmed": false
+  },
+  {
+   "callsign": "RAMROD",
+   "prefixes": [
+    "RAMD",
+    "RMRD"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "82 WING AMBERLEY",
+   "ops_freq": "316.200",
+   "confirmed": true
+  },
+  {
+   "callsign": "RANGER",
+   "prefixes": [],
+   "aircraft": "HORNET",
+   "squadron": "3 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "RAPTOR",
+   "prefixes": [
+    "RAPT"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "79 SQN PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "RAVEN",
+   "prefixes": [
+    "RAVN"
+   ],
+   "aircraft": "PILATUS PC-21",
+   "squadron": "4 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "RAYTHEON",
+   "prefixes": [
+    "SEE"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "REACH",
+   "prefixes": [
+    "RCH"
+   ],
+   "aircraft": "USAF FORMATION (C-17 GLOBEMASTER III)",
+   "squadron": "37 SQN RICHMOND * FORMATION WITH USAF *",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "REAPER",
+   "prefixes": [
+    "REPR",
+    "REAP"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "4 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "RECKLESS",
+   "prefixes": [
+    "RECK"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "B SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "REDBACK",
+   "prefixes": [
+    "RDBK"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "173 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "REDHAWK",
+   "prefixes": [
+    "RHWK"
+   ],
+   "aircraft": "H64",
+   "squadron": "RSAF OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "REGAL",
+   "prefixes": [],
+   "aircraft": "AIRBUS KC-30A",
+   "squadron": "33 SQN AMBERLEY",
+   "ops_freq": "301.500",
+   "confirmed": false
+  },
+  {
+   "callsign": "REGENT",
+   "prefixes": [
+    "RGNT"
+   ],
+   "aircraft": "BBJ / CHALLENGER 604 VIP FALCON 7X",
+   "squadron": "34 SQN FAIRBAIRN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "RENEGADE",
+   "prefixes": [
+    "RNGD"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "161 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "REPTILE",
+   "prefixes": [
+    "REPT"
+   ],
+   "aircraft": "BELL 429 / EC-135",
+   "squadron": "723 SQN NAVY NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "REPUBLIC",
+   "prefixes": [
+    "RPLC"
+   ],
+   "aircraft": "HAWK 127",
+   "squadron": "78 WG WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "RHINO",
+   "prefixes": [],
+   "aircraft": "SUPER HORNET",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "RICCOM",
+   "prefixes": [],
+   "aircraft": "",
+   "squadron": "RAAF BASE RICHMOND",
+   "ops_freq": "261.700 MHFCS HF VCN3",
+   "confirmed": true
+  },
+  {
+   "callsign": "RIDER",
+   "prefixes": [
+    "RIDER"
+   ],
+   "aircraft": "HERCULES C-130H",
+   "squadron": "RSAF (SINGAPORE A/F)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ROGUE",
+   "prefixes": [
+    "ROGE"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "B SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "ROLLER",
+   "prefixes": [
+    "ROLR"
+   ],
+   "aircraft": "CT-4B / PILATUS PC-21",
+   "squadron": "BFTS TAMWORTH",
+   "ops_freq": "129.150",
+   "confirmed": true
+  },
+  {
+   "callsign": "ROMEO",
+   "prefixes": [],
+   "aircraft": "HAWK 127",
+   "squadron": "79 SQN PEARCE",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "ROUL BLACK",
+   "prefixes": [
+    "RLTK"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "THE ROULETTES (BASED EAST SALE)",
+   "ops_freq": "335.800 375.400",
+   "confirmed": true
+  },
+  {
+   "callsign": "ROUL BLUE",
+   "prefixes": [
+    "RLTU"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "THE ROULETTES (BASED EAST SALE)",
+   "ops_freq": "335.800 375.400",
+   "confirmed": true
+  },
+  {
+   "callsign": "ROUL RED",
+   "prefixes": [
+    "RLTR"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "THE ROULETTES (BASED EAST SALE)",
+   "ops_freq": "335.800 375.400",
+   "confirmed": true
+  },
+  {
+   "callsign": "ROUL WHITE",
+   "prefixes": [
+    "RLTW"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "THE ROULETTES (BASED EAST SALE)",
+   "ops_freq": "335.800 375.400",
+   "confirmed": true
+  },
+  {
+   "callsign": "ROULETTES",
+   "prefixes": [
+    "EAST",
+    "SALE",
+    "RLTS"
+   ],
+   "aircraft": "PILATUS PC-9A PILATUS PC-21 / PILATUS PC-21(FORMATION)",
+   "squadron": "THE ROULETTES (BASED EAST SALE)",
+   "ops_freq": "335.800 375.400",
+   "confirmed": true
+  },
+  {
+   "callsign": "RUBY",
+   "prefixes": [
+    "RUBY"
+   ],
+   "aircraft": "CH47 CHINOOK (FORMATION)",
+   "squadron": "126 SQN RSAF OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "RUTHLESS",
+   "prefixes": [
+    "RUTH"
+   ],
+   "aircraft": "EA-18G GROWLER (FORMATION)",
+   "squadron": "6 SQN AMBERLEY",
+   "ops_freq": "395.350",
+   "confirmed": true
+  },
+  {
+   "callsign": "SAA OAKEY",
+   "prefixes": [
+    "OAKEY",
+    "SCHOOL",
+    "ARMY"
+   ],
+   "aircraft": "VARIOUS HELO",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "SAA TOWNSVILLE",
+   "prefixes": [
+    "SCHOOL",
+    "ARMY"
+   ],
+   "aircraft": "CH47F",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "SABOT",
+   "prefixes": [
+    "SBOT"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SABRE",
+   "prefixes": [
+    "SABR"
+   ],
+   "aircraft": "EA-18G GROWLER (FORMATION)",
+   "squadron": "6 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SAFARI",
+   "prefixes": [
+    "SFRI"
+   ],
+   "aircraft": "",
+   "squadron": "HQ AIR LIFT GROUP (ALG) RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SALTY",
+   "prefixes": [
+    "SALT"
+   ],
+   "aircraft": "VARIOUS HELO",
+   "squadron": "HQ 16 AVN BDE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SALVO",
+   "prefixes": [
+    "SLVO"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SAMBA",
+   "prefixes": [
+    "SAMB"
+   ],
+   "aircraft": "PILATUS PC-21 (FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SAMURAI",
+   "prefixes": [
+    "SMRI"
+   ],
+   "aircraft": "C27J SPARTAN (FORMATION)",
+   "squadron": "35 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SANDY",
+   "prefixes": [
+    "SNDY"
+   ],
+   "aircraft": "MRH-90",
+   "squadron": "A SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SAVAGE",
+   "prefixes": [
+    "SAVG"
+   ],
+   "aircraft": "EA-18G GROWLER (FORMATION)",
+   "squadron": "6 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SAXON",
+   "prefixes": [
+    "SAXN"
+   ],
+   "aircraft": "BLACKHAWK / VARIOUS ARMY HELO",
+   "squadron": "SAA OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SCANEAGLE",
+   "prefixes": [],
+   "aircraft": "SCAN EAGLE AV1422",
+   "squadron": "822X SQN NAVY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SCIMITAR",
+   "prefixes": [
+    "SCIM"
+   ],
+   "aircraft": "SUPER HORNET / VARIOUS ARMY HELO",
+   "squadron": "6 SQN AMBERLEY / AWES OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SCOUT",
+   "prefixes": [
+    "SCOT"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "AWES OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SEA LION",
+   "prefixes": [
+    "SELN"
+   ],
+   "aircraft": "AP-3C ORION P-8A POSEIDON",
+   "squadron": "92 WG EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SEARCHER",
+   "prefixes": [
+    "SRCH"
+   ],
+   "aircraft": "F35 (FORMATION)",
+   "squadron": "81 WG WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SERPENT",
+   "prefixes": [
+    "SERP"
+   ],
+   "aircraft": "BELL 429 / EC 135",
+   "squadron": "723 SQN NAVY NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SHADE",
+   "prefixes": [
+    "SHDE"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "162 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SHADOW",
+   "prefixes": [
+    "SHDW"
+   ],
+   "aircraft": "C-17 GLOBEMASTER III / LJ35",
+   "squadron": "37 SQN RICHMOND / ADF CONTRACTOR (RAN OPERATIONS - RAYTHEON)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SHARK",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "808 SQN NAVY NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SHEPERD",
+   "prefixes": [
+    "SHEP"
+   ],
+   "aircraft": "AP-3C ORION",
+   "squadron": "11 SQN EDNIBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SHOGUN",
+   "prefixes": [
+    "SHOG"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "253.600",
+   "confirmed": true
+  },
+  {
+   "callsign": "SHOT",
+   "prefixes": [],
+   "aircraft": "SUPER HORNET",
+   "squadron": "1 SQN AMBERLEY",
+   "ops_freq": "279.800, 315.000, 320.500, 344.100, 362.800",
+   "confirmed": false
+  },
+  {
+   "callsign": "SHRIKE",
+   "prefixes": [
+    "SHRK"
+   ],
+   "aircraft": "BLACKHAWK / VARIOUS ARMY HELO",
+   "squadron": "AHS OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SIERRA",
+   "prefixes": [
+    "SIRA"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21 (STUDENT SOLO)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SIGMA",
+   "prefixes": [
+    "SGMA",
+    "SIGMA"
+   ],
+   "aircraft": "TEST FLIGHT (FORMATION)",
+   "squadron": "ARDU EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SILVER",
+   "prefixes": [],
+   "aircraft": "HORNET",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "SINGA",
+   "prefixes": [],
+   "aircraft": "RSAF",
+   "squadron": "SINGAPORE A.F",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SLEDGEHAMMER",
+   "prefixes": [
+    "SHMR"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR (RAAF OPERATIONS - RAYTHEON)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SLINGSHOT",
+   "prefixes": [
+    "SLNG"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SNAKE EYE",
+   "prefixes": [
+    "SNKE"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SNIPER",
+   "prefixes": [
+    "SNPR"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "162 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SNOOKER",
+   "prefixes": [
+    "SNKR"
+   ],
+   "aircraft": "VARIOUS",
+   "squadron": "AATES",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SNOOPY",
+   "prefixes": [
+    "SNPY"
+   ],
+   "aircraft": "PILATUS PC-21 (FORMATION)",
+   "squadron": "4 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SONIC",
+   "prefixes": [
+    "SONC"
+   ],
+   "aircraft": "VARIOUS EA18G GROWLER (FORMATION)",
+   "squadron": "82 WG AMBERLEY 6 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SPAD",
+   "prefixes": [],
+   "aircraft": "PC9 / PILATUS PC-21",
+   "squadron": "CFS EAST SALE",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "SPARK",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "5 AVN REGT",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SPARROW",
+   "prefixes": [
+    "SPRW"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "75 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SPARTAN",
+   "prefixes": [
+    "SPTN"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "171 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SPEARGUN",
+   "prefixes": [],
+   "aircraft": "RQ-7B",
+   "squadron": "20 STA ENOGGERA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SPECTRE",
+   "prefixes": [
+    "SPCT"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SPIDER",
+   "prefixes": [],
+   "aircraft": "BBJ / CHALLENGER 604 VIP",
+   "squadron": "UNCONFIRMED",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "SPITFIRE",
+   "prefixes": [
+    "SPIT"
+   ],
+   "aircraft": "PILATUS PC-21 (FORMATION)",
+   "squadron": "CFS EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SPUD",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SPUR",
+   "prefixes": [],
+   "aircraft": "EA18G GROWLER",
+   "squadron": "6 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "SQN",
+   "prefixes": [],
+   "aircraft": "AIRCRAFT",
+   "squadron": "",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "SQUIRREL",
+   "prefixes": [
+    "SQRL"
+   ],
+   "aircraft": "BELL 429 / EC135",
+   "squadron": "723 SQN NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "STALKER",
+   "prefixes": [
+    "SLKR"
+   ],
+   "aircraft": "LJ35",
+   "squadron": "ADF CONTRACTOR (RAYTHEON)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "STALLION",
+   "prefixes": [
+    "STAL"
+   ],
+   "aircraft": "C-17 GLOBEMASTER",
+   "squadron": "36 SQN AMBERLEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "STAMPEDE",
+   "prefixes": [
+    "STPD"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "C SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "STARLING",
+   "prefixes": [
+    "STAR"
+   ],
+   "aircraft": "EC25",
+   "squadron": "126 SQN RSAF OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "STEEL",
+   "prefixes": [],
+   "aircraft": "KING AIR 350",
+   "squadron": "38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": false
+  },
+  {
+   "callsign": "STINGER",
+   "prefixes": [
+    "STGR",
+    "STNG"
+   ],
+   "aircraft": "C27J SPARTAN / PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "35 SQN RICHMOND / 2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "STINGRAY",
+   "prefixes": [],
+   "aircraft": "HORNET",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "256.500 282.500 336.000",
+   "confirmed": false
+  },
+  {
+   "callsign": "STOCKADE",
+   "prefixes": [
+    "STKD"
+   ],
+   "aircraft": "HAWK 127 (FORMATION)",
+   "squadron": "78 WG WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "STOCKMAN",
+   "prefixes": [
+    "SKMN"
+   ],
+   "aircraft": "CH47F CHINOOK",
+   "squadron": "C SQN 5 AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "STORM",
+   "prefixes": [
+    "STO",
+    "STRM"
+   ],
+   "aircraft": "PC-21 TRAINER (FORMATION)",
+   "squadron": "130 SQN RSAF (PEARCE)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "STREAK",
+   "prefixes": [
+    "STRE"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "STRIKER",
+   "prefixes": [
+    "STKR"
+   ],
+   "aircraft": "AP-3C ORION",
+   "squadron": "10 SQN EDINBURGH 92 WG EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SURFER",
+   "prefixes": [
+    "SRFR"
+   ],
+   "aircraft": "WEDGETAIL",
+   "squadron": "2 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "SWORD",
+   "prefixes": [
+    "SWRD"
+   ],
+   "aircraft": "VARIOUS EA18G GROWLER (FORMATION)",
+   "squadron": "82 WG AMBERLEY 6 SQN AMBERLEY",
+   "ops_freq": "395.350",
+   "confirmed": true
+  },
+  {
+   "callsign": "SWORDFISH",
+   "prefixes": [
+    "SWFH"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "808 SQN NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TAIPAN - CONFIRMED NAVY",
+   "prefixes": [
+    "TAIP"
+   ],
+   "aircraft": "BELL 429 / EC135",
+   "squadron": "ARMY / NAVY HELO TRAINING 723 SQN NOWRA",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "TAIPAN BLACK",
+   "prefixes": [
+    "TBLK"
+   ],
+   "aircraft": "BLACKHAWK / BLACKHAWK FORMATION",
+   "squadron": "1ST AV RGT ARMY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TAIPAN BLUE",
+   "prefixes": [],
+   "aircraft": "SQUIRRELL FORMATION",
+   "squadron": "ARMY / NAVY HELO TRAINING 723 SQN NOWRA",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "TAIPAN RED",
+   "prefixes": [],
+   "aircraft": "SQUIRRELL FORMATION",
+   "squadron": "ARMY / NAVY HELO TRAINING 723 SQN NOWRA",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "TALON",
+   "prefixes": [
+    "TALN"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "256.500 282.500 336.000",
+   "confirmed": true
+  },
+  {
+   "callsign": "TANGO",
+   "prefixes": [
+    "TANG",
+    "TANGO"
+   ],
+   "aircraft": "PC9 (TEST FLIGHT) PC21 (TEST FLIGHT)",
+   "squadron": "2 FTS PEARCE 130 SQN RSAF PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TATTLER",
+   "prefixes": [
+    "TATT",
+    "TAT"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TAWNY",
+   "prefixes": [
+    "TWNY"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TEAL",
+   "prefixes": [
+    "TEAL"
+   ],
+   "aircraft": "PC9 (FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TEMPEST",
+   "prefixes": [
+    "TMPS"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "CFS EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TEMPLAR",
+   "prefixes": [
+    "TPLR"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "SAA OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TEREK",
+   "prefixes": [
+    "TREK"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TESTER",
+   "prefixes": [
+    "TEST",
+    "TSTR"
+   ],
+   "aircraft": "TEST FLIGHT",
+   "squadron": "ARDU EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "THETA",
+   "prefixes": [
+    "THAT"
+   ],
+   "aircraft": "TEST FLIGHT (FORMATION)",
+   "squadron": "ARDU EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "THOR",
+   "prefixes": [
+    "THOR"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "HQ 6 AVN REGT HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "THUMPER",
+   "prefixes": [
+    "THUM"
+   ],
+   "aircraft": "AIRBUS KC-30A MRTT",
+   "squadron": "33 SQN AMBERLEY",
+   "ops_freq": "301.500 AERIAL REFUELLING",
+   "confirmed": true
+  },
+  {
+   "callsign": "THUNDER",
+   "prefixes": [
+    "TNDR",
+    "THA"
+   ],
+   "aircraft": "HERCULES C-130-H - OBSOLETE / C-17 GLOBEMASTER III (FORMATION) / PC-21 TRAINER",
+   "squadron": "36 / 37 SQN RICHMOND / 36 SQN AMBERLEY / 130 SQN RSAF (PEARCE)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TIGER",
+   "prefixes": [
+    "TIGR"
+   ],
+   "aircraft": "MH-60R SEAHAWK / HAWK 127 (FORMATION)",
+   "squadron": "816 SQN NAVY NOWRA / 76 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TIGERCUB",
+   "prefixes": [
+    "TIGR"
+   ],
+   "aircraft": "MH-60R SEAHAWK (FORMATION)",
+   "squadron": "816 SQN NAVY NOWRA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TITAN",
+   "prefixes": [
+    "TITN"
+   ],
+   "aircraft": "AIRBUS KC-30A, C-17, B350 / AIRBUS KC-30A",
+   "squadron": "86 WG AMBERLEY / 33 SQN AMBERLEY",
+   "ops_freq": "301.500",
+   "confirmed": true
+  },
+  {
+   "callsign": "TOPAZ",
+   "prefixes": [
+    "TOPZ"
+   ],
+   "aircraft": "EC25 (FORMATION)",
+   "squadron": "126 SQN RSAF OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TORCH",
+   "prefixes": [
+    "TRCH"
+   ],
+   "aircraft": "KING AIR 350",
+   "squadron": "32 SQN EAST SALE (1 FTS STUDENT TASKING)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TORNADO",
+   "prefixes": [
+    "TORN"
+   ],
+   "aircraft": "CH47F CHINOOK / HERCULES C-130-H - OBSOLETE",
+   "squadron": "SAA TTW TOWNSVILLE / 37 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TOXIN",
+   "prefixes": [
+    "TOXN"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "256.500 282.500 336.000",
+   "confirmed": true
+  },
+  {
+   "callsign": "TRIDENT",
+   "prefixes": [
+    "TRDT"
+   ],
+   "aircraft": "P-8A POSEIDON",
+   "squadron": "92 WG EDINBURGH",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TRILLER",
+   "prefixes": [
+    "TRIL",
+    "TRLR"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TRIPOD",
+   "prefixes": [
+    "TRPD"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "2 OCU WILLIAMTOWN",
+   "ops_freq": "256.500 282.500 336.000",
+   "confirmed": true
+  },
+  {
+   "callsign": "TROJAN",
+   "prefixes": [
+    "TROJ"
+   ],
+   "aircraft": "HERCULES C130J-30",
+   "squadron": "37 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TROOPER",
+   "prefixes": [
+    "TRPR"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "AHS OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TROPIC",
+   "prefixes": [
+    "TROP"
+   ],
+   "aircraft": "TIGER",
+   "squadron": "162 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TUG",
+   "prefixes": [
+    "TUG"
+   ],
+   "aircraft": "LJ35 TARGET TOW",
+   "squadron": "DEFENCE CONTRACTOR",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TURBO",
+   "prefixes": [
+    "TRBO"
+   ],
+   "aircraft": "KING AIR 350 (FORMATION)",
+   "squadron": "32 SQN EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TWISTER",
+   "prefixes": [
+    "TWI",
+    "TWIS",
+    "TWST"
+   ],
+   "aircraft": "PC-21 TRAINER (FORMATION)",
+   "squadron": "130 SQN RSAF (PEARCE)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TYPHOON",
+   "prefixes": [
+    "TYPH",
+    "TYPN"
+   ],
+   "aircraft": "PILATUS PC-21(FORMATION)",
+   "squadron": "CFS EAST SALE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "TYRANT",
+   "prefixes": [
+    "TRNT"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "UNMANNED BLUEY",
+   "prefixes": [
+    "UXBLY"
+   ],
+   "aircraft": "IAI HERON",
+   "squadron": "5 FLIGHT AMBERLEY / WOOMERA / EDINBURGH",
+   "ops_freq": "CTAF 118.3 385.6 F1D",
+   "confirmed": true
+  },
+  {
+   "callsign": "UNMANNED HAL",
+   "prefixes": [],
+   "aircraft": "IAI HERON",
+   "squadron": "5 FLIGHT AMBERLEY / WOOMERA / EDINBURGH",
+   "ops_freq": "CTAF 118.3 385.6 F1D",
+   "confirmed": true
+  },
+  {
+   "callsign": "UNMANNED SPEARGUN",
+   "prefixes": [],
+   "aircraft": "RQ-7B",
+   "squadron": "20 STA ENOGGERA",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VALIANT",
+   "prefixes": [
+    "VALT"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VALKYRIE",
+   "prefixes": [
+    "VALK"
+   ],
+   "aircraft": "BLACKHAWK",
+   "squadron": "HQ 6 AVN REGT HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VALOUR",
+   "prefixes": [
+    "VALO"
+   ],
+   "aircraft": "C-27J SPARTAN",
+   "squadron": "35 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VAMPIRE",
+   "prefixes": [
+    "VAMP"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VANDAL",
+   "prefixes": [
+    "VDAL"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "SAA OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VANGUARD",
+   "prefixes": [
+    "VNGD"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VANTAGE",
+   "prefixes": [
+    "VANT"
+   ],
+   "aircraft": "PC9 PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VENGEANCE",
+   "prefixes": [
+    "VENG"
+   ],
+   "aircraft": "P8 POSEIDON",
+   "squadron": "EDINBURGH (92 WING)",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VENOM",
+   "prefixes": [
+    "VENM"
+   ],
+   "aircraft": "BLACKHAWK / MRH-90",
+   "squadron": "173 AVN SQN HOLSWORTHY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VICIOUS",
+   "prefixes": [
+    "VOUS"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "SAA OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VICTOR",
+   "prefixes": [],
+   "aircraft": "PC9 / PILATUS PC-21",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "VIGILANCE",
+   "prefixes": [
+    "VIGL"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "HQ AVNCMD OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VIKING",
+   "prefixes": [
+    "VIKG"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VILLAIN",
+   "prefixes": [
+    "VLAN"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "SAA OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VIPER",
+   "prefixes": [
+    "VIPR",
+    "VIPER"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VIXEN",
+   "prefixes": [
+    "VIXN"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VOODOO",
+   "prefixes": [
+    "VODO"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VORTEX",
+   "prefixes": [
+    "VORT"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "VULCAN",
+   "prefixes": [
+    "VULC"
+   ],
+   "aircraft": "PC9 / PILATUS PC-21(FORMATION)",
+   "squadron": "2 FTS PEARCE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "WALER",
+   "prefixes": [
+    "WALR"
+   ],
+   "aircraft": "VARIOUS ARMY HELO",
+   "squadron": "AHS OAKEY",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "WALLABY",
+   "prefixes": [
+    "WLBY"
+   ],
+   "aircraft": "C27J SPARTAN",
+   "squadron": "35 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "WARHORSE",
+   "prefixes": [
+    "WHSE"
+   ],
+   "aircraft": "A139",
+   "squadron": "B SQN 5TH AVN REGT TOWNSVILLE",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "WARLOCK",
+   "prefixes": [
+    "WRLK"
+   ],
+   "aircraft": "HORNET (FORMATION)",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "380.000",
+   "confirmed": true
+  },
+  {
+   "callsign": "WARLORD",
+   "prefixes": [
+    "WLRD"
+   ],
+   "aircraft": "C27J SPARTAN (FORMATION)",
+   "squadron": "35 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "WARRIOR",
+   "prefixes": [
+    "WARR"
+   ],
+   "aircraft": "HERCULES C130J-30 (FORMATION)",
+   "squadron": "37 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "WARTHOG",
+   "prefixes": [
+    "WTHG"
+   ],
+   "aircraft": "APACHE",
+   "squadron": "161 SQN DARWIN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "WEDGE",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "WEDGETAIL",
+   "prefixes": [
+    "WGTL"
+   ],
+   "aircraft": "WEDGETGAIL",
+   "squadron": "2 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "WEREWOLF",
+   "prefixes": [],
+   "aircraft": "SUPER HORNET",
+   "squadron": "1 SQN, 6SQN AMBERLEY",
+   "ops_freq": "393.700, 395.350",
+   "confirmed": false
+  },
+  {
+   "callsign": "WHEELER",
+   "prefixes": [],
+   "aircraft": "BLACKHAWK",
+   "squadron": "ARMY",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "WHIPTAIL",
+   "prefixes": [],
+   "aircraft": "C-27J SPARTAN",
+   "squadron": "35 SQN RICHMOND",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "WHITE",
+   "prefixes": [],
+   "aircraft": "HORNET",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "WINDSOR",
+   "prefixes": [
+    "WNSR"
+   ],
+   "aircraft": "AIRBUS KC-30A MRTT",
+   "squadron": "33 SQN AMBERLEY",
+   "ops_freq": "301.500 AERIAL REFUELLING",
+   "confirmed": true
+  },
+  {
+   "callsign": "WINDSOR CASTLE",
+   "prefixes": [],
+   "aircraft": "AIRBUS KC-30A",
+   "squadron": "33 SQN AMBERLEY",
+   "ops_freq": "301.500",
+   "confirmed": false
+  },
+  {
+   "callsign": "WINJEEL",
+   "prefixes": [],
+   "aircraft": "OBSOLETE",
+   "squadron": "1 FTS - DISBANDED",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "WISDOM",
+   "prefixes": [
+    "WSDM"
+   ],
+   "aircraft": "BBJ / CHALLENGER 604 VIP FALCON 7X",
+   "squadron": "34 SQN FAIRBAIRN",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "WIZARD",
+   "prefixes": [
+    "WZRD"
+   ],
+   "aircraft": "HERCULES C130J-30 (FORMATION)",
+   "squadron": "285 SQN RICHMOND - DISBANDED 2017",
+   "ops_freq": "",
+   "confirmed": true
+  },
+  {
+   "callsign": "WOLF",
+   "prefixes": [
+    "WOLF"
+   ],
+   "aircraft": "EA-18G GROWLER",
+   "squadron": "6 SQN AMBERLEY",
+   "ops_freq": "395.350",
+   "confirmed": true
+  },
+  {
+   "callsign": "WOMBAT",
+   "prefixes": [
+    "WMBT"
+   ],
+   "aircraft": "A139 / KING AIR 350",
+   "squadron": "B SQN 5 AVN REGT TOWNSVILLE / 38 SQN TOWNSVILLE - DISBANDED",
+   "ops_freq": "392.45",
+   "confirmed": true
+  },
+  {
+   "callsign": "YELLOW",
+   "prefixes": [],
+   "aircraft": "HORNET",
+   "squadron": "77 SQN WILLIAMTOWN",
+   "ops_freq": "",
+   "confirmed": false
+  },
+  {
+   "callsign": "ZULU",
+   "prefixes": [
+    "ZULU"
+   ],
+   "aircraft": "F35 LIGHTNING (FORMATION)",
+   "squadron": "3 SQN WILLIAMTOWN",
+   "ops_freq": "288.600 324.400",
+   "confirmed": true
+  }
+ ]
+}

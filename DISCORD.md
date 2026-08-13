@@ -103,6 +103,10 @@ Outbound mentions are otherwise suppressed via `allowed_mentions`, so a transcri
 | `/reconnect <N\|ICAO>` | Force a station to drop and redial its stream |
 | `/vad <N\|ICAO> [value]` | Show or set that station's VAD threshold live |
 | `/record on\|off` | Toggle saving transmission audio to `recordings/` |
+| `/military` | Military callsign registry status — count, last scrape, detection on/off |
+| `/military on\|off` | Toggle military callsign detection |
+| `/military refresh` | Re-scrape the ADF callsign list now |
+| `/military FALCON` | Look up one callsign's airframe, unit and ops frequency |
 
 `/health` is the one to reach for mid-event: it tells you whether a quiet station is quiet because there's no traffic (`audio` recent, `last TX` old) or because the feed is dead (`audio` old, `reconnects` climbing).
 

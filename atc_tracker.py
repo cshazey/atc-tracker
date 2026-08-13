@@ -43,6 +43,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 import config
+import military_callsigns
 import transcription
 from config import (
     ATC_CORRECTIONS,
@@ -159,6 +160,7 @@ class SharedState:
         self.keywords_enabled = keywords_enabled
         self.paused = False
         self.recording_enabled = config.RECORDING_ENABLED
+        self.military_enabled = config.MILITARY_DETECTION_ENABLED
         self.stop_event = threading.Event()
         self._lock = threading.Lock()
         self.station_enabled: dict = {}
@@ -191,6 +193,10 @@ class SharedState:
     def set_recording(self, enabled: bool) -> None:
         with self._lock:
             self.recording_enabled = enabled
+
+    def set_military(self, enabled: bool) -> None:
+        with self._lock:
+            self.military_enabled = enabled
 
     def get_vad_threshold(self, icao: str) -> float:
         with self._lock:
@@ -790,14 +796,25 @@ class Transcriber:
         recording = self._save_recording(raw_audio if raw_audio is not None else np.array([]), icao)
         rec_name = recording.name if recording else ""
 
+        military = _military_matches(text, self._state)
+        highlight = KEYWORDS + [m.matched_text for m in military]
+
         dur_str = f"({duration:.1f}s) " if duration > 0 else ""
         line = Text()
         line.append(f"[{ts}] {icao} {station_name:<16} {dur_str}│ ", style="bold green")
-        line.append_text(_highlight_keywords(text, KEYWORDS, enabled=self._state.keywords_enabled))
+        line.append_text(_highlight_keywords(text, highlight, enabled=self._state.keywords_enabled))
         self._tui_log(line)
+        if military:
+            self._tui_log(Text(
+                f"{'':>{len(ts) + 2}} \U0001f6e9 {_military_summary(military)}",
+                style="bold magenta" if any(m.strong for m in military) else "dim magenta",
+            ))
+
         tier = _keyword_tier(text)
-        _send_telegram(text, ts, icao, station_name, tier)
-        _send_discord(text, ts, ts_iso, icao, station_name, tier, rec_name)
+        if any(m.strong for m in military):
+            tier = max(tier, TIER_INTEREST)
+        _send_telegram(text, ts, icao, station_name, tier, military)
+        _send_discord(text, ts, ts_iso, icao, station_name, tier, rec_name, military)
         if self._log_file:
             try:
                 with open(self._log_file, "a", encoding="utf-8") as f:
@@ -963,6 +980,27 @@ def _keyword_tier(text: str) -> int:
     return TIER_NONE
 
 
+# ---------------------------------------------------------------------------
+# Military callsign detection (see military_callsigns.py)
+#
+# A strong hit — an exact callsign, or a misheard one corroborated by a flight
+# number and military context — raises the transmission to TIER_INTEREST even
+# when no keyword fired. A weak hit is annotated on the station's own message
+# but never escalated: the registry holds 400+ words and Whisper mangles enough
+# of them that alerting on every near-miss would bury the real ones.
+# ---------------------------------------------------------------------------
+
+def _military_matches(text: str, state: Optional[SharedState] = None) -> list:
+    if state is not None and not state.military_enabled:
+        return []
+    return military_callsigns.detect(text)
+
+
+def _military_summary(matches: list, strong_only: bool = False) -> str:
+    picked = [m for m in matches if m.strong or not strong_only]
+    return " · ".join(m.describe() for m in picked)
+
+
 def _apply_atc_corrections(text: str) -> str:
     for pattern, replacement in ATC_CORRECTIONS:
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
@@ -1023,7 +1061,14 @@ def _post_telegram(message: str) -> None:
             _display_ref.log(Text(f"⚠ Telegram send failed: {exc}", style="dim yellow"))
 
 
-def _send_telegram(text: str, ts: str, icao: str, station_name: str, tier: int) -> None:
+def _send_telegram(
+    text: str,
+    ts: str,
+    icao: str,
+    station_name: str,
+    tier: int,
+    military: Optional[list] = None,
+) -> None:
     label = f"{icao} {station_name}"
     if tier == TIER_EMERGENCY:
         header = f"\U0001f6a8 <b>[EMERGENCY]</b> {label}"
@@ -1031,7 +1076,10 @@ def _send_telegram(text: str, ts: str, icao: str, station_name: str, tier: int) 
         header = f"\U0001f534 <b>[ALERT]</b> {label}"
     else:
         header = f"\U0001f4fb {label}"
-    _post_telegram(f"{header}\n<code>[{ts}]</code> {html.escape(text)}")
+    body = f"{header}\n<code>[{ts}]</code> {html.escape(text)}"
+    if military:
+        body += f"\n\U0001f6e9 <b>{html.escape(_military_summary(military))}</b>"
+    _post_telegram(body)
 
 
 def _send_startup_notification(state: SharedState) -> None:
@@ -1275,6 +1323,7 @@ def _send_discord(
     station_name: str,
     tier: int,
     recording: str = "",
+    military: Optional[list] = None,
 ) -> None:
     if tier == TIER_EMERGENCY:
         title = f"\U0001f6a8 {icao} {station_name}"
@@ -1293,6 +1342,13 @@ def _send_discord(
         "footer": {"text": footer},
         "timestamp": ts_iso,
     }
+    if military:
+        strong = [m for m in military if m.strong]
+        embed["fields"] = [{
+            "name": "\U0001f6e9 Military callsign" if strong else "\U0001f6e9 Possible military callsign",
+            "value": _military_summary(military)[:1000],
+            "inline": False,
+        }]
     channel_id = _discord_channel_for(icao)
     if channel_id:
         _enqueue_discord(channel_id, embed=dict(embed))
@@ -1311,7 +1367,9 @@ def _send_discord(
             allowed_mentions={"parse": ["everyone"]},
         )
     else:
-        matched = ", ".join(_matched_keywords(text, KEYWORDS_INTEREST))
+        labels = _matched_keywords(text, KEYWORDS_INTEREST)
+        labels += [m.label for m in (military or []) if m.strong]
+        matched = ", ".join(dict.fromkeys(labels))
         alert_embed["title"] = f"\U0001f534 {matched or 'ALERT'} — {icao} {station_name}"
         _enqueue_discord(DISCORD_ALERTS_CHANNEL_ID, embed=alert_embed, priority=True)
 
@@ -1521,6 +1579,10 @@ def _handle_command(
             "/vad YBCG 0.003 — show or set a station's VAD threshold\n"
             "/record on|off — toggle transmission audio recording\n"
             "/keywords on|off — toggle keyword highlighting\n"
+            "/military — military callsign registry status\n"
+            "/military on|off — toggle military callsign detection\n"
+            "/military refresh — re-scrape the callsign list now\n"
+            "/military FALCON — look a callsign up\n"
             "/pause — suspend all transcription & forwarding\n"
             "/resume — restart transcription & forwarding\n"
             "/help — this message"
@@ -1551,6 +1613,12 @@ def _handle_command(
             lines.append(f"Discord outbox: <b>{_discord_outbox.depth}</b>")
         lines.append(f"Recording: <b>{'ON' if state.recording_enabled else 'OFF'}</b>")
         lines.append(f"STT backend: <b>{_backend_name}</b>")
+        mil = military_callsigns.get_registry().stats()
+        lines.append(
+            f"Military callsigns: <b>{mil['count']}</b> "
+            f"({'on' if state.military_enabled else 'off'}, "
+            f"scraped {mil['last_success_at']})"
+        )
         respond("\n".join(lines))
 
     elif cmd == "status":
@@ -1709,6 +1777,42 @@ def _handle_command(
                 state.display.refresh()
         else:
             respond("Usage: /keywords on  or  /keywords off")
+
+    elif cmd in ("military", "mil", "callsign", "callsigns"):
+        if arg_l in ("on", "off"):
+            want = arg_l == "on"
+            state.set_military(want)
+            respond(f"\U0001f6e9 Military callsign detection: <b>{'ON' if want else 'OFF'}</b>")
+            tui(f"{source} → military detection {'ON' if want else 'OFF'}")
+        elif arg_l == "refresh":
+            respond("\U0001f6e9 Refreshing the callsign list…")
+            result = military_callsigns.get_registry().refresh(force=True)
+            respond(("✅ " if result.ok else "⚠ ") + html.escape(result.message))
+            tui(f"{source} → callsign refresh: {result.message}")
+        elif arg:
+            record = military_callsigns.get_registry().lookup(arg)
+            if record is None:
+                respond(f"\U0001f6e9 <code>{html.escape(arg.upper())}</code> is not in the registry")
+            else:
+                respond(
+                    f"\U0001f6e9 <b>{html.escape(record.callsign)}</b>\n"
+                    f"{html.escape(record.describe())}"
+                    + (f"\nOps freq: <code>{html.escape(record.ops_freq)}</code>" if record.ops_freq else "")
+                    + ("\n<i>confirmed</i>" if record.confirmed else "")
+                )
+        else:
+            stats = military_callsigns.get_registry().stats()
+            lines = [
+                "\U0001f6e9 <b>Military callsign registry</b>",
+                f"Detection: <b>{'ON' if state.military_enabled else 'OFF'}</b>",
+                f"Callsigns: <b>{stats['count']}</b>",
+                f"Last scrape: {stats['last_success_at']}",
+            ]
+            if stats["last_error"]:
+                lines.append(f"Last error: <code>{html.escape(stats['last_error'])}</code>")
+            lines.append(f"Source: {html.escape(stats['source'])}")
+            lines.append("\n/military on|off · /military refresh · /military FALCON")
+            respond("\n".join(lines))
 
     elif cmd in ("pause", "resume"):
         want_paused = cmd == "pause"
@@ -2162,9 +2266,18 @@ def main() -> None:
                         help="Start only these stations, e.g. --stations YBCG YSPT")
     parser.add_argument("--calibrate", default=None, metavar="ICAO",
                         help="Calibrate VAD for a station, e.g. --calibrate YBCG")
+    parser.add_argument("--no-military", action="store_true",
+                        help="Disable military callsign detection")
+    parser.add_argument("--refresh-callsigns", action="store_true",
+                        help="Re-scrape the military callsign list and exit")
     args = parser.parse_args()
 
     console = Console()
+
+    if args.refresh_callsigns:
+        result = military_callsigns.get_registry().refresh(force=True)
+        console.print(("[green]✅ " if result.ok else "[red]⚠ ") + result.message)
+        return
 
     if args.calibrate:
         icao = args.calibrate.upper()
@@ -2188,6 +2301,8 @@ def main() -> None:
 
     runtime_config = RuntimeConfig(Path(__file__).parent / "runtime_config.json")
     state = SharedState(keywords_enabled=not args.no_keywords, runtime_config=runtime_config)
+    if args.no_military:
+        state.set_military(False)
 
     requested = {s.upper() for s in args.stations} if args.stations else None
     for s in STREAMS:
@@ -2244,6 +2359,15 @@ def main() -> None:
             target=_keyboard_listener, args=(state,), daemon=True, name="keyboard"
         )
         kb_thread.start()
+
+        if state.military_enabled:
+            military_callsigns.start_auto_refresh(
+                stop_event=state.stop_event,
+                on_result=lambda r: display.log(Text(
+                    f"\U0001f6e9 Callsign registry: {r.message}",
+                    style="dim cyan" if r.ok else "dim yellow",
+                )),
+            )
 
         transcriber = Transcriber(
             backend, state, log_file=log_file, recordings_dir=recordings_dir,

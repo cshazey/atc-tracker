@@ -11,6 +11,8 @@ Detects each radio call via voice activity detection, transcribes it with a loca
 
 Alerts are two-tier: **emergency** terms (MAYDAY, PAN PAN, squawk 7700/7600/7500) ping `@here` in `#alerts`; **interest** terms (display and military callsigns, RESTRICTED, COASTAL) post to `#alerts` without a ping. Both are highlighted in red in the terminal.
 
+Every transcript is also checked against a [scraped register of ADF callsigns](#military-callsign-detection), so "Falcon one one" is flagged as a 6 SQN Growler without anyone having to add FALCON to a keyword list.
+
 ---
 
 ## Requirements
@@ -115,6 +117,8 @@ venv/bin/python atc_tracker.py --model mlx-community/whisper-tiny-mlx  # faster,
 venv/bin/python atc_tracker.py --no-keywords          # start with highlighting off
 venv/bin/python atc_tracker.py --no-recording         # don't save transmission audio
 venv/bin/python atc_tracker.py --calibrate YBCG       # print live RMS values for YBCG
+venv/bin/python atc_tracker.py --no-military          # disable military callsign detection
+venv/bin/python atc_tracker.py --refresh-callsigns    # re-scrape the ADF callsign list and exit
 ```
 
 ---
@@ -275,6 +279,45 @@ Matching is whole-word and case-insensitive. **Avoid bare numbers** — `"18"` a
 
 ---
 
+## Military callsign detection
+
+`military_callsigns.py` keeps a local register of Australian Defence Force callsigns — around 500 of them, scraped from [swld.com.au](https://www.swld.com.au/pages/aus_raaf_callsigns.htm) — and checks every transcript against it. A hit reports the airframe and unit alongside the transmission:
+
+```
+[14:22:07] YBCG Brisbane Centre  (4.2s) │ Falcon one one, Brisbane Centre, climb flight level two four zero
+                                  🛩 FALCON One One (EA18G GROWLER — 6 SQN AMBERLEY)
+```
+
+The register lives in `data/military_callsigns.db` (SQLite, git-ignored) and a background thread re-scrapes the page once a day. `data/military_callsigns_seed.json` is a committed snapshot, loaded automatically when the database is empty, so detection works on a fresh clone and offline. Refresh by hand with `--refresh-callsigns`, or `/military refresh` from Discord.
+
+**Matching is fuzzy, because Whisper has never been trained on these words** and mangles them — "Falcum 11", "Foulcon one one". Three tiers are tried: exact, bounded Levenshtein (budget scales with callsign length), then a Soundex-style consonant skeleton.
+
+**Hits are strong or weak.** A strong hit raises the transmission to the interest tier and posts to `#alerts`. A weak hit — usually a misheard callsign — only annotates the transcript in its own station channel, marked *[possible]*. That split exists because an unguarded search over 500 callsigns fires on roughly one transmission in twenty-five: `starting 53` becomes STARLING, `Water four zero one` becomes WALER, and every `Golf Kilo Delta` becomes DELTA. Four guards get it down to ~1% of transmissions annotated across the historical logs, most of them genuine:
+
+| Guard | What it stops |
+|-------|---------------|
+| `MILITARY_CALLSIGN_BLOCKLIST` | Phonetic alphabet, formation colours, and civil types spoken with a number — "Dash 8", "King Air 350", "Baron 58" |
+| `MILITARY_CALLSIGN_AMBIGUOUS` | Callsigns that are everyday words (TIGER, REACH, STORM): exact match only, and no alert without military context |
+| `data/english_lookalikes.txt` | English words within reach of a callsign are never fuzzy-matched |
+| Flight-number rule | An everyday-word callsign must be followed by a number — real traffic says "Falcon one one", not "Falcon" |
+
+Tuning and inspection:
+
+```bash
+venv/bin/python military_callsigns.py match "falcum one one, request descent"  # try the matcher
+venv/bin/python military_callsigns.py dump --limit 20                          # what's stored
+venv/bin/python military_callsigns.py stats                                    # count, last scrape
+venv/bin/python military_callsigns.py refresh --force                          # re-scrape now
+venv/bin/python military_callsigns.py build-lookalikes                         # after editing thresholds
+venv/bin/python test_military.py                                               # regression suite
+```
+
+Add a callsign the source page hasn't listed yet — a visiting display team, say — via `MILITARY_EXTRA_CALLSIGNS` in `config.py`. Set `MILITARY_ALERT_ON_FUZZY = True` if you would rather have every near-miss alert; expect roughly one false alert per 100 transmissions. Disable the feature entirely with `MILITARY_DETECTION_ENABLED=0`, `--no-military`, or `/military off`.
+
+A scrape that returns fewer than `MILITARY_MIN_SCRAPE_ROWS` (300) rows is treated as a layout change on the source site and discarded, so the existing register survives the page being restyled or taken down.
+
+---
+
 ## Recordings
 
 Every detected transmission is saved to `recordings/YYYY-MM-DD/<ICAO>_<HHMMSS>.wav` (16 kHz mono, pre-processing, so it stays a faithful source for re-transcription). The filename appears in the terminal log line and in the Discord embed footer, so any transcript can be traced back to its audio.
@@ -312,3 +355,6 @@ The gate also tracks a rolling noise floor and requires speech to sit a multiple
 | `config.py` → `VAD_SILENCE_HANGOVER` | Silence gap before a TX is considered done (0.7 s) |
 | `config.py` → `VAD_PREROLL_SEC` | Audio kept from before VAD trips, so callsigns aren't clipped |
 | `config.py` → `STREAM_STALL_TIMEOUT_SEC` | How long a silent connection may sit before reconnecting |
+| `config.py` → `MILITARY_CALLSIGN_BLOCKLIST` / `_AMBIGUOUS` | Which callsigns may fire, and how much corroboration they need |
+| `config.py` → `MILITARY_MIN_CONFIDENCE` / `MILITARY_ALERT_ON_FUZZY` | How readily a misheard callsign counts |
+| `.env` → `MILITARY_DETECTION_ENABLED` / `MILITARY_REFRESH_HOURS` | Military callsign detection on/off and scrape interval |
