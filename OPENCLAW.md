@@ -207,6 +207,14 @@ To add keywords, edit `KEYWORDS_EMERGENCY` / `KEYWORDS_INTEREST` in `config.py`.
 
 **Do not add bare numbers.** `"18"` and `"500"` were previously in the list and fired on every "runway 18" and "500 feet" — during an event that volume of false alerts buries the real ones.
 
+### Military callsigns
+
+Separately from the keyword lists, every transcript is matched against ~500 ADF callsigns scraped daily from swld.com.au into `data/military_callsigns.db` (`military_callsigns.py`). A strong hit — an exact callsign, or a misheard one corroborated by a flight number and military context — raises the transmission to the 🔴 interest tier and names the airframe and unit in the alert. A weak hit only annotates the station's own message as *[possible]*.
+
+That split matters for the same reason bare numbers do: matching 500 words fuzzily against noisy STT fires on roughly one transmission in twenty-five if left unguarded ("starting 53" → STARLING, "Water four zero one" → WALER). The guards are a blocklist, an ambiguous list, a generated English-lookalike list, and a rule that an everyday-word callsign must be followed by a flight number. `venv/bin/python test_military.py` asserts the whole thing, including a false-positive budget measured against `logs/`.
+
+Runtime: `/military`, `/military on|off`, `/military refresh`, `/military FALCON`. Startup: `--no-military`, `--refresh-callsigns`.
+
 ---
 
 ## Controls (foreground)
@@ -283,3 +291,7 @@ Station numbers match the order in the startup list (and the `STREAMS` list in `
 | `config.py` → `VAD_SILENCE_HANGOVER` | float (seconds) | Silence gap before TX is considered done |
 | `config.py` → `MAX_TRANSMISSION_SEC` | int (seconds) | Safety cap on buffer length |
 | `config.py` → `RECONNECT_DELAY_SEC` | int (seconds) | Delay before reconnecting after stream error |
+| `config.py` → `MILITARY_CALLSIGN_BLOCKLIST` | set of strings | Callsigns never matched (phonetic alphabet, civil types) |
+| `config.py` → `MILITARY_CALLSIGN_AMBIGUOUS` | set of strings | Callsigns needing military context before they alert |
+| `config.py` → `MILITARY_MIN_CONFIDENCE` / `MILITARY_ALERT_ON_FUZZY` | float / bool | How readily a misheard callsign counts |
+| `.env` | `MILITARY_DETECTION_ENABLED` / `MILITARY_REFRESH_HOURS` | Military callsign detection on/off, scrape interval |

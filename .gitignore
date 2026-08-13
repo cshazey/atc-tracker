@@ -16,3 +16,7 @@ dist/
 build/
 *.whl
 *.tar.gz
+
+# Scraped callsign database — rebuilt from the seed + the live page.
+data/*.db
+data/*.db-journal

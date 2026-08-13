@@ -269,6 +269,109 @@ KEYWORDS_INTEREST = [
 KEYWORDS = KEYWORDS_EMERGENCY + KEYWORDS_INTEREST
 
 # ---------------------------------------------------------------------------
+# Military callsign registry (military_callsigns.py)
+#
+# The ADF callsign table at swld.com.au is scraped into a local SQLite database
+# roughly once a day and every transcript is checked against it, so a Growler
+# calling "FALCON one one" is flagged even though FALCON is nowhere in
+# KEYWORDS_INTEREST. Matching is fuzzy because Whisper has never been trained on
+# these words and reliably mangles them.
+#
+# Tune for precision, not recall: this feed says "runway one four" and "Golf
+# Kilo Delta" all day, and a false alert costs more than a missed one.
+# ---------------------------------------------------------------------------
+MILITARY_CALLSIGN_URL = os.environ.get(
+    "MILITARY_CALLSIGN_URL",
+    "https://www.swld.com.au/pages/aus_raaf_callsigns.htm",
+)
+_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+MILITARY_CALLSIGN_DB = os.environ.get(
+    "MILITARY_CALLSIGN_DB", os.path.join(_DATA_DIR, "military_callsigns.db")
+)
+# Snapshot committed to the repo, loaded when the database is empty so detection
+# works on first run and offline. Refresh it with:
+#   venv/bin/python military_callsigns.py refresh --force && \
+#   venv/bin/python military_callsigns.py export-seed
+MILITARY_CALLSIGN_SEED = os.path.join(_DATA_DIR, "military_callsigns_seed.json")
+
+MILITARY_DETECTION_ENABLED = os.environ.get(
+    "MILITARY_DETECTION_ENABLED", "1"
+).strip() not in ("0", "false", "False", "")
+
+# Hours between scrapes, and how often the background thread wakes to check.
+MILITARY_REFRESH_HOURS = float(os.environ.get("MILITARY_REFRESH_HOURS", "24"))
+MILITARY_REFRESH_CHECK_SEC = 3600
+MILITARY_REFRESH_STARTUP_DELAY_SEC = 45
+
+# A scrape returning fewer rows than this is treated as a layout change and the
+# existing database is kept rather than overwritten. The page carries ~480.
+MILITARY_MIN_SCRAPE_ROWS = 300
+
+# Shorter than this and a callsign is too easy to hit by accident.
+MILITARY_MIN_CALLSIGN_LEN = 4
+
+MILITARY_FUZZY = True
+MILITARY_MIN_CONFIDENCE = float(os.environ.get("MILITARY_MIN_CONFIDENCE", "0.70"))
+MILITARY_PHONETIC_CONFIDENCE = 0.72
+# Soundex collapses vowels, so short words collide constantly ("there's" and
+# TEREK share a skeleton). Only long callsigns may match on phonetics alone.
+MILITARY_MIN_PHONETIC_LEN = 6
+# Fuzzy hits annotate the transcript but do not by themselves raise an alert
+# unless the transmission is militarily flavoured some other way. Flip to True
+# to alert on every fuzzy hit — expect roughly one false alert per 100
+# transmissions on these feeds.
+MILITARY_ALERT_ON_FUZZY = False
+
+# English words close enough to a callsign to be mistaken for one. Regenerate
+# after the callsign list changes with:
+#   venv/bin/python military_callsigns.py build-lookalikes
+MILITARY_LOOKALIKE_FILE = os.path.join(_DATA_DIR, "english_lookalikes.txt")
+
+# Never matched. The NATO phonetic alphabet is excluded in code; these are the
+# entries on the source page that are ordinary words, formation colours, or —
+# worse — civil aircraft types that are routinely spoken with a number after
+# them ("Dash 8", "King Air 350", "Baron 58", "Archer 28").
+MILITARY_CALLSIGN_BLOCKLIST = {
+    # Formation colours
+    "AMBER", "BLACK", "BLUE", "BROWN", "GOLD", "GREEN", "SILVER", "TEAL",
+    "WHITE", "YELLOW",
+    # Ordinary words / ATC vocabulary
+    # CHANNEL and CENTURY are both what Whisper turns "Centre" into, and the
+    # Gold Coast has a Channel and a Century tower to boot.
+    "BUSH", "CANTER", "CASTLE", "CENTRAL", "CENTURY", "CHANNEL", "CHECK",
+    "CHECKER", "CLASSIC",
+    "CODE", "DEEP-V", "DIVER", "EASY", "EMBER", "FAIRWAY", "FARMER", "GASSER",
+    "HAT-TRICK", "HERO", "HIGHRISE", "MINOR", "NIGHT", "OPAL", "PACK", "PHAT",
+    "RAMP", "RUBY", "SALTY", "SANDY", "SHADE", "SHOT", "SPUD", "SPUR", "STEEL",
+    "TUG",
+    # Civil aircraft types and operators heard on these feeds
+    "ARCHER", "ARROW", "BARON", "CALTEX", "CHEETAH", "CHIEFTAIN", "CHOPPER",
+    "COLT", "CONCORDE", "CRUISER", "DASH", "DIAMOND", "DUKE", "HAWK", "KING",
+    "PORTER", "WARRIOR",
+}
+
+# Matched only on an exact hit that is either followed by a flight number
+# ("ARMY two one") or sits in a transmission that is otherwise clearly military.
+# Never fuzzy-matched.
+#
+# ARMY, NAVY and AIR FORCE are deliberately NOT here: they are everyday words,
+# so the flight-number rule already covers them, and "Navy one three" deserves
+# a full alert.
+MILITARY_CALLSIGN_AMBIGUOUS = {
+    "ANGEL", "ANGRY", "BEAR", "BLADE", "BOLT", "BRADY", "CLAW", "CROWE",
+    "EAGLE", "EMPIRE", "FANG", "FURY", "GARRET", "HALO", "HELMUT", "HERITAGE",
+    "HOGAN", "HOWLETTE", "HUDSON", "HUNTER", "IRON", "JACKSON", "JUDGE",
+    "JUSTICE", "LIBERTY", "LION", "LODY", "MAGIC", "MENTOR", "MIDNIGHT",
+    "MITCHELL", "MONARCH", "OGGY", "OUTBACK", "REACH", "REGENT", "RIDER",
+    "ROLLER", "SCOUT", "SHARK", "SPIDER", "STORM", "SURFER", "SWORD", "TESTER",
+    "THUNDER", "TIGER", "TORCH", "TROOPER", "TWISTER", "WEDGE", "WHEELER",
+}
+
+# Callsigns to add on top of whatever the scrape returns, e.g. a visiting
+# display team the source page has not listed yet. name -> description.
+MILITARY_EXTRA_CALLSIGNS: dict = {}
+
+# ---------------------------------------------------------------------------
 # Telegram integration
 # Set credentials via environment variables or edit the values below directly.
 # TELEGRAM_ENABLED is automatically True when both are non-empty.
