@@ -1,27 +1,33 @@
 #!/usr/bin/env python3
 """
 ATC Tracker — multi-station live speech-to-text transcription.
-Streams MP3 audio from LiveATC.net, detects transmissions via VAD,
-transcribes with Whisper, highlights configurable keywords, and forwards
-every transmission to Telegram when credentials are configured.
+Streams MP3 audio from LiveATC.net, detects transmissions via VAD, transcribes
+them with a pluggable local backend (Whisper or Parakeet — see
+transcription.py), highlights configurable keywords, records each transmission
+to disk, and forwards everything to Discord and Telegram.
 
 Controls:
   1/2/3/… — toggle individual stations on/off
   K       — toggle keyword highlighting on/off
+  T       — toggle Telegram forwarding
+  P       — pause/resume transcription
   Q / Ctrl+C — quit
 """
 
 import argparse
 import collections
+import functools
 import html
 import json
 import queue
+import random
 import re
 import shutil
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+import wave
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Callable, Optional
@@ -29,7 +35,6 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import miniaudio
-import mlx_whisper
 import numpy as np
 from scipy.signal import butter, sosfilt
 import requests
@@ -38,20 +43,35 @@ from rich.panel import Panel
 from rich.text import Text
 
 import config
+import transcription
 from config import (
     ATC_CORRECTIONS,
     AUDIO_PREPROCESSING,
     DISCORD_ALERTS_CHANNEL_ID,
     DISCORD_COMMANDS_CHANNEL_ID,
     KEYWORDS,
+    KEYWORDS_EMERGENCY,
+    KEYWORDS_INTEREST,
+    MAX_COMPRESSION_RATIO,
+    MAX_NO_SPEECH_PROB,
     MAX_TRANSMISSION_SEC,
+    MIN_AVG_LOGPROB,
+    PROMPT_ECHO_MAX_OVERLAP,
     RECONNECT_DELAY_SEC,
+    RECONNECT_MAX_DELAY_SEC,
+    REPEAT_NGRAM_MAX_WORDS,
+    REPEAT_NGRAM_THRESHOLD,
     STREAMS,
+    STREAM_STALL_TIMEOUT_SEC,
+    VAD_ADAPTIVE,
     VAD_CHUNK_FRAMES,
+    VAD_NOISE_FLOOR_MULT,
+    VAD_NOISE_WINDOW_FRAMES,
+    VAD_PREROLL_SEC,
     VAD_RMS_THRESHOLD,
     VAD_SAMPLE_RATE,
     VAD_SILENCE_HANGOVER,
-    WHISPER_INITIAL_PROMPT,
+    WEAK_AVG_LOGPROB,
     WHISPER_MODEL,
 )
 
@@ -120,10 +140,25 @@ class RuntimeConfig:
             return existed
 
 
+class StationHealth:
+    """Per-station liveness counters, surfaced by /health."""
+
+    __slots__ = ("last_audio_at", "last_tx_at", "reconnects", "dropped", "connected", "active_url")
+
+    def __init__(self):
+        self.last_audio_at: Optional[float] = None
+        self.last_tx_at: Optional[float] = None
+        self.reconnects = 0
+        self.dropped = 0
+        self.connected = False
+        self.active_url = ""
+
+
 class SharedState:
     def __init__(self, keywords_enabled: bool, runtime_config: RuntimeConfig):
         self.keywords_enabled = keywords_enabled
         self.paused = False
+        self.recording_enabled = config.RECORDING_ENABLED
         self.stop_event = threading.Event()
         self._lock = threading.Lock()
         self.station_enabled: dict = {}
@@ -132,6 +167,10 @@ class SharedState:
         self._default_stream_urls = {s["icao"]: s["url"] for s in STREAMS}
         self._stream_urls = dict(self._default_stream_urls)
         self._stream_versions = {s["icao"]: 0 for s in STREAMS}
+        self.health = {s["icao"]: StationHealth() for s in STREAMS}
+        self._vad_thresholds = {
+            s["icao"]: s.get("vad_threshold", VAD_RMS_THRESHOLD) for s in STREAMS
+        }
         for icao, url in runtime_config.stream_overrides().items():
             if icao in self._stream_urls:
                 self._stream_urls[icao] = url
@@ -140,6 +179,26 @@ class SharedState:
         with self._lock:
             self.keywords_enabled = not self.keywords_enabled
             return self.keywords_enabled
+
+    def set_keywords(self, enabled: bool) -> None:
+        with self._lock:
+            self.keywords_enabled = enabled
+
+    def set_paused(self, paused: bool) -> None:
+        with self._lock:
+            self.paused = paused
+
+    def set_recording(self, enabled: bool) -> None:
+        with self._lock:
+            self.recording_enabled = enabled
+
+    def get_vad_threshold(self, icao: str) -> float:
+        with self._lock:
+            return self._vad_thresholds.get(icao, VAD_RMS_THRESHOLD)
+
+    def set_vad_threshold(self, icao: str, value: float) -> None:
+        with self._lock:
+            self._vad_thresholds[icao.upper()] = value
 
     def toggle_pause(self) -> bool:
         with self._lock:
@@ -192,6 +251,13 @@ class SharedState:
                 self._stream_versions[icao] = self._stream_versions.get(icao, 0) + 1
         persisted = self._runtime_config.reset_stream_url(icao)
         return changed or persisted
+
+    def bump_stream_url_version(self, icao: str) -> None:
+        """Signals the station's stream loop to drop its connection and redial.
+        The loop already watches this counter to pick up /seturl changes."""
+        icao = icao.upper()
+        with self._lock:
+            self._stream_versions[icao] = self._stream_versions.get(icao, 0) + 1
 
     def has_stream_override(self, icao: str) -> bool:
         with self._lock:
@@ -371,6 +437,11 @@ _display_ref: Optional[LiveDisplay] = None
 # and the terminal/log file are unaffected.
 _telegram_active: bool = False
 
+# Set in main(); read by /health so the command handler doesn't need them
+# threaded through every call site.
+_transcriber_ref: Optional["Transcriber"] = None
+_backend_name: str = config.STT_BACKEND
+
 
 # ---------------------------------------------------------------------------
 # HTTP stream source for miniaudio
@@ -379,25 +450,34 @@ _telegram_active: bool = False
 class LiveATCSource(miniaudio.StreamableSource):
     _BUFFER_MAX = 65536
 
-    def __init__(self, url: str, headers: dict):
+    def __init__(self, url: str, headers: dict, stall_timeout: float = STREAM_STALL_TIMEOUT_SEC):
         self._deque: collections.deque = collections.deque()
         self._deque_bytes = 0
         self._cond = threading.Condition()
         self._stop = threading.Event()
         self._error: Optional[Exception] = None
+        self._stall_timeout = stall_timeout
+        self.last_data_at: Optional[float] = None
+        self.resolved_url = url
         self._thread = threading.Thread(target=self._fetch, args=(url, headers), daemon=True)
         self._thread.start()
 
     def _fetch(self, url: str, headers: dict):
         try:
-            with requests.get(url, headers=headers, stream=True, timeout=30) as resp:
+            # allow_redirects is the point of using d.liveatc.net: it 302s to
+            # whichever edge currently serves the mount.
+            with requests.get(
+                url, headers=headers, stream=True, timeout=30, allow_redirects=True
+            ) as resp:
                 resp.raise_for_status()
+                self.resolved_url = resp.url
                 for chunk in resp.iter_content(chunk_size=4096):
                     if self._stop.is_set():
                         return
                     if not chunk:
                         continue
                     with self._cond:
+                        self.last_data_at = time.monotonic()
                         self._deque.append(chunk)
                         self._deque_bytes += len(chunk)
                         while self._deque_bytes > self._BUFFER_MAX and self._deque:
@@ -413,9 +493,24 @@ class LiveATCSource(miniaudio.StreamableSource):
         result = bytearray()
         while len(result) < num_bytes:
             with self._cond:
+                # The stall check has to live here, not in the consumer loop: a
+                # LiveATC edge that holds the socket open but stops sending
+                # parks this thread in the wait() below, so the consumer never
+                # gets another iteration in which to notice.
+                waiting_since = time.monotonic()
                 while not self._deque and not self._stop.is_set() and self._error is None:
                     self._cond.wait(timeout=1.0)
-                if self._error is not None:
+                    idle_since = self.last_data_at or waiting_since
+                    if time.monotonic() - idle_since > self._stall_timeout:
+                        raise IOError(
+                            f"stream stalled — no audio for {self._stall_timeout}s"
+                        )
+                # Drain whatever arrived before the error: audio already in the
+                # buffer is still good, and discarding it truncates the final
+                # transmission of every disconnect.
+                if self._error is not None and not self._deque:
+                    if result:
+                        break  # hand back the tail, raise on the next read
                     raise IOError(f"Stream fetch error: {self._error}") from self._error
                 if self._stop.is_set() and not self._deque:
                     break
@@ -443,11 +538,43 @@ class LiveATCSource(miniaudio.StreamableSource):
 # ---------------------------------------------------------------------------
 
 class VoiceActivityDetector:
-    def __init__(self, threshold: float = VAD_RMS_THRESHOLD):
+    """RMS gate with an adaptive noise floor.
+
+    The configured threshold is a floor, not a ceiling: if a feed turns hissy
+    mid-event its own noise would otherwise sit above the gate and hold it
+    permanently open, turning the whole stream into one endless "transmission".
+    Tracking a rolling low percentile of recent frames and requiring speech to
+    sit a multiple above it keeps the gate honest on a degraded feed.
+    """
+
+    def __init__(self, threshold: float = VAD_RMS_THRESHOLD, adaptive: bool = VAD_ADAPTIVE):
+        self.threshold = threshold
+        self.adaptive = adaptive
+        self._recent: collections.deque = collections.deque(maxlen=VAD_NOISE_WINDOW_FRAMES)
+        self._floor = 0.0
+        self._since_recompute = 0
+
+    def set_base_threshold(self, threshold: float) -> None:
         self.threshold = threshold
 
+    @property
+    def effective_threshold(self) -> float:
+        if not self.adaptive:
+            return self.threshold
+        return max(self.threshold, self._floor * VAD_NOISE_FLOOR_MULT)
+
     def is_speech(self, chunk: np.ndarray) -> bool:
-        return float(np.sqrt(np.mean(chunk ** 2))) > self.threshold
+        rms = float(np.sqrt(np.mean(chunk ** 2)))
+        speech = rms > self.effective_threshold
+        if self.adaptive and not speech:
+            # Only non-speech frames inform the noise floor, so a long
+            # transmission cannot drag the floor up after itself.
+            self._recent.append(rms)
+            self._since_recompute += 1
+            if self._since_recompute >= 100 and len(self._recent) >= 50:
+                self._floor = float(np.percentile(np.fromiter(self._recent, dtype=np.float32), 20))
+                self._since_recompute = 0
+        return speech
 
 
 class AudioPreprocessor:
@@ -462,13 +589,20 @@ class AudioPreprocessor:
         self.enabled = enabled
         self._sos = butter(4, [300 / 8000.0, 3400 / 8000.0], btype='bandpass', output='sos')
 
-    def process(self, audio: np.ndarray) -> np.ndarray:
+    def process(self, audio: np.ndarray, preroll_samples: int = 0) -> np.ndarray:
+        """`preroll_samples` is how much of `audio` precedes the VAD trigger.
+
+        The lead trim is only allowed to eat into that pre-roll. Without a
+        pre-roll to spend it would take 80 ms off the start of the transmission
+        itself, which is where the callsign lives.
+        """
         if not self.enabled or len(audio) == 0:
             return audio
         filtered = sosfilt(self._sos, audio).astype(np.float32)
-        trim = self._LEAD_SAMPLES + self._TAIL_SAMPLES
+        lead = min(self._LEAD_SAMPLES, max(0, preroll_samples))
+        trim = lead + self._TAIL_SAMPLES
         if len(filtered) > trim:
-            filtered = filtered[self._LEAD_SAMPLES: len(filtered) - self._TAIL_SAMPLES]
+            filtered = filtered[lead: len(filtered) - self._TAIL_SAMPLES]
         peak = float(np.percentile(np.abs(filtered), 95))
         if peak > 1e-6:
             filtered = (filtered * (0.7 / peak)).clip(-1.0, 1.0).astype(np.float32)
@@ -483,19 +617,40 @@ _preprocessor = AudioPreprocessor(enabled=AUDIO_PREPROCESSING)
 # ---------------------------------------------------------------------------
 
 class TransmissionBuffer:
-    def __init__(self, sample_rate: int = VAD_SAMPLE_RATE):
+    """Accumulates a transmission, with a rolling pre-roll of the audio just
+    before it started. VHF speech begins at the same instant the gate opens,
+    so without a pre-roll the first syllable of the callsign is already gone by
+    the time VAD has decided this is speech."""
+
+    def __init__(self, sample_rate: int = VAD_SAMPLE_RATE, preroll_sec: float = VAD_PREROLL_SEC):
         self._chunks: list = []
         self._sample_rate = sample_rate
+        preroll_chunks = max(1, int((preroll_sec * sample_rate) / VAD_CHUNK_FRAMES))
+        self._preroll: collections.deque = collections.deque(maxlen=preroll_chunks)
+        self._preroll_samples = 0
+
+    def observe_silence(self, chunk: np.ndarray):
+        """Feed a non-speech chunk into the pre-roll ring (dropped once the
+        transmission ends, kept as lead-in when one starts)."""
+        if not self._chunks:
+            self._preroll.append(chunk)
 
     def append(self, chunk: np.ndarray):
+        if not self._chunks and self._preroll:
+            self._chunks.extend(self._preroll)
+            self._preroll_samples = sum(len(c) for c in self._preroll)
+            self._preroll.clear()
         self._chunks.append(chunk)
 
-    def flush(self) -> np.ndarray:
+    def flush(self) -> tuple[np.ndarray, int]:
+        """Returns (audio, preroll_samples)."""
         if not self._chunks:
-            return np.array([], dtype=np.float32)
+            return np.array([], dtype=np.float32), 0
         audio = np.concatenate(self._chunks)
+        preroll = self._preroll_samples
         self._chunks = []
-        return audio
+        self._preroll_samples = 0
+        return audio, preroll
 
     @property
     def duration_seconds(self) -> float:
@@ -507,24 +662,56 @@ class TransmissionBuffer:
 # ---------------------------------------------------------------------------
 
 class Transcriber:
-    _MIN_DURATION = 0.5
+    _MIN_DURATION = 0.7
+    # 95th-percentile amplitude of the RAW audio; below this the clip is squelch
+    # noise that tripped VAD rather than speech. Sits just above the 0.003 RMS
+    # gate so it rejects only marginal trips.
+    _MIN_PEAK = 0.005
 
-    def __init__(self, model: str, state: SharedState, log_file: Optional[Path] = None):
-        self._model = model
+    def __init__(
+        self,
+        backend: transcription.TranscriptionBackend,
+        state: SharedState,
+        log_file: Optional[Path] = None,
+        recordings_dir: Optional[Path] = None,
+    ):
+        self._backend = backend
         self._state = state
         self._log_file = log_file
-        self._queue: queue.Queue = queue.Queue(maxsize=8)
+        self._recordings_dir = recordings_dir
+        self._queue: queue.Queue = queue.Queue(maxsize=24)
         self._recent: dict = {}  # icao -> (text, monotonic_time) for dedup
+        self._prompts = {s["icao"]: s.get("prompt", "") for s in STREAMS}
+        self.gated = 0      # transmissions rejected by the quality gate
         self._thread = threading.Thread(target=self._worker, daemon=True, name="transcriber")
         self._thread.start()
 
-    def submit(self, audio: np.ndarray, duration: float, icao: str, station_name: str, ts: str, ts_iso: str) -> bool:
+    @property
+    def queue_depth(self) -> int:
+        return self._queue.qsize()
+
+    def submit(
+        self,
+        audio: np.ndarray,
+        raw_audio: np.ndarray,
+        duration: float,
+        icao: str,
+        station_name: str,
+        ts: str,
+        ts_iso: str,
+    ) -> bool:
         if duration < self._MIN_DURATION:
             return False
+        # Checked against the raw audio, not the processed audio: the
+        # preprocessor normalises the 95th percentile to 0.7, so this test
+        # would never fire on its output.
+        if len(raw_audio) and float(np.percentile(np.abs(raw_audio), 95)) < self._MIN_PEAK:
+            return False
         try:
-            self._queue.put_nowait((audio, duration, icao, station_name, ts, ts_iso))
+            self._queue.put_nowait((audio, raw_audio, duration, icao, station_name, ts, ts_iso))
             return True
         except queue.Full:
+            self._state.health[icao].dropped += 1
             self._tui_log(Text(f"⚠ [{icao}] Transcriber busy — dropping TX", style="yellow"))
             return False
 
@@ -536,23 +723,16 @@ class Transcriber:
         while True:
             item = self._queue.get()
             if item is None:
+                self._queue.task_done()
                 break
-            audio, duration, icao, station_name, ts, ts_iso = item
+            audio, raw_audio, duration, icao, station_name, ts, ts_iso = item
             try:
-                result = mlx_whisper.transcribe(
-                    audio,
-                    path_or_hf_repo=self._model,
-                    language="en",
-                    verbose=None,
-                    temperature=(0.0, 0.2, 0.4),
-                    compression_ratio_threshold=2.0,
-                    no_speech_threshold=0.6,
-                    condition_on_previous_text=False,
-                    initial_prompt=WHISPER_INITIAL_PROMPT,
-                )
-                text = (result.get("text") or "").strip()
+                segments = self._backend.transcribe(audio, prompt=self._prompts.get(icao, ""))
+                text = _apply_quality_gate(segments)
                 if text:
-                    self._log(text, icao, station_name, ts, ts_iso, duration)
+                    self._log(text, icao, station_name, ts, ts_iso, duration, raw_audio)
+                elif segments:
+                    self.gated += 1
             except Exception as exc:
                 msg = str(exc)
                 if "401" in msg or "authentication" in msg.lower() or "username or password" in msg.lower():
@@ -565,32 +745,71 @@ class Transcriber:
             finally:
                 self._queue.task_done()
 
-    def _log(self, text: str, icao: str, station_name: str, ts: str, ts_iso: str, duration: float = 0.0):
+    def _save_recording(self, raw_audio: np.ndarray, icao: str) -> Optional[Path]:
+        """Writes the pre-preprocessing audio, so recordings stay a faithful
+        source for re-transcription and for bench_stt.py."""
+        if not self._recordings_dir or not self._state.recording_enabled or not len(raw_audio):
+            return None
+        try:
+            now = datetime.now(timezone.utc).astimezone(_AEST)
+            day_dir = self._recordings_dir / now.strftime("%Y-%m-%d")
+            day_dir.mkdir(parents=True, exist_ok=True)
+            path = day_dir / f"{icao}_{now.strftime('%H%M%S')}.wav"
+            pcm = (np.clip(raw_audio, -1.0, 1.0) * 32767).astype(np.int16)
+            with wave.open(str(path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(VAD_SAMPLE_RATE)
+                wf.writeframes(pcm.tobytes())
+            return path
+        except Exception as exc:
+            self._tui_log(Text(f"⚠ Recording failed [{icao}]: {exc}", style="dim yellow"))
+            return None
+
+    def _log(
+        self,
+        text: str,
+        icao: str,
+        station_name: str,
+        ts: str,
+        ts_iso: str,
+        duration: float = 0.0,
+        raw_audio: Optional[np.ndarray] = None,
+    ):
         text = _apply_atc_corrections(text)
-        if _is_hallucination(text):
+        if _is_hallucination(text, prompt=self._prompts.get(icao, "")):
+            self.gated += 1
             return
         now = time.monotonic()
         prev_text, prev_time = self._recent.get(icao, ("", 0.0))
         if text == prev_text and now - prev_time < 20.0:
             return
         self._recent[icao] = (text, now)
+        self._state.health[icao].last_tx_at = time.time()
+
+        recording = self._save_recording(raw_audio if raw_audio is not None else np.array([]), icao)
+        rec_name = recording.name if recording else ""
+
         dur_str = f"({duration:.1f}s) " if duration > 0 else ""
         line = Text()
         line.append(f"[{ts}] {icao} {station_name:<16} {dur_str}│ ", style="bold green")
         line.append_text(_highlight_keywords(text, KEYWORDS, enabled=self._state.keywords_enabled))
         self._tui_log(line)
-        has_kw = _has_keywords(text, KEYWORDS)
-        _send_telegram(text, ts, icao, station_name, has_kw)
-        _send_discord(text, ts, ts_iso, icao, station_name, has_kw)
+        tier = _keyword_tier(text)
+        _send_telegram(text, ts, icao, station_name, tier)
+        _send_discord(text, ts, ts_iso, icao, station_name, tier, rec_name)
         if self._log_file:
             try:
                 with open(self._log_file, "a", encoding="utf-8") as f:
-                    f.write(f"{ts} | {icao} | {station_name} | {text}\n")
+                    f.write(f"{ts} | {icao} | {station_name} | {text} | {rec_name}\n")
             except Exception:
                 pass
 
     def shutdown(self):
-        self._queue.put(None)
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
         self._thread.join(timeout=10)
 
 
@@ -601,31 +820,147 @@ class Transcriber:
 # Matches any 1–4 char sequence repeated 8+ times (e.g. "9.9.9.9.9.9.9.9.9")
 _REPETITION_RE = re.compile(r'(.{1,4})\1{7,}')
 
-# Short filler phrases Whisper emits on silence/noise
-_WHISPER_FILLERS = frozenset({"you", ".", ""})
+# Short filler phrases Whisper emits on silence/noise. Whisper's training data
+# was full of subtitle files, so it falls back to sign-off lines when there is
+# nothing to hear.
+_WHISPER_FILLERS = frozenset({
+    "you", ".", "", "thank you", "thanks", "thanks for watching",
+    "thank you for watching", "bye", "bye bye", "okay", "ok", "yeah",
+    "please subscribe", "subtitles by the amara.org community", "the end",
+})
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
 
 
-def _is_hallucination(text: str) -> bool:
+def _normalise_words(text: str) -> list[str]:
+    return _WORD_RE.findall(text.lower())
+
+
+def _has_repeated_ngram(
+    words: list[str],
+    max_n: int = REPEAT_NGRAM_MAX_WORDS,
+    threshold: int = REPEAT_NGRAM_THRESHOLD,
+) -> bool:
+    """True if any 1..max_n word phrase repeats back-to-back `threshold` times.
+
+    The old character-level filter only caught 1–4 character loops, so real
+    failures like "North Carolina, " x70 and "turning base, " x12 went straight
+    through to Discord — 8.5% of the historical log lines.
+    """
+    n_words = len(words)
+    for n in range(1, max_n + 1):
+        if n * threshold > n_words:
+            break
+        for i in range(n_words - n * threshold + 1):
+            phrase = words[i:i + n]
+            if all(words[i + k * n: i + (k + 1) * n] == phrase for k in range(1, threshold)):
+                return True
+    return False
+
+
+def _ngrams(words: list[str], n: int = 5) -> set:
+    if len(words) < n:
+        return {tuple(words)} if words else set()
+    return {tuple(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def _is_prompt_echo(text: str, prompt: str) -> bool:
+    """True when the output is mostly the station's own prompt read back.
+
+    Whisper reproduces its initial_prompt verbatim on low-content audio, and
+    does so at high confidence (an observed echo scored avg_logprob -0.152), so
+    no confidence threshold catches this — it has to be compared to the prompt.
+    """
+    if not prompt:
+        return False
+    words = _normalise_words(text)
+    if len(words) < 5:
+        return False
+    text_grams = _ngrams(words)
+    if not text_grams:
+        return False
+    prompt_grams = _ngrams(_normalise_words(prompt))
+    overlap = len(text_grams & prompt_grams) / len(text_grams)
+    return overlap > PROMPT_ECHO_MAX_OVERLAP
+
+
+def _is_hallucination(text: str, prompt: str = "") -> bool:
     stripped = text.strip()
     if not stripped:
         return True
     if _REPETITION_RE.search(stripped):
         return True
-    if stripped.rstrip(".").lower() in _WHISPER_FILLERS:
+    if stripped.rstrip(".!?").lower() in _WHISPER_FILLERS:
+        return True
+    words = _normalise_words(stripped)
+    if not words:
+        return True
+    if _has_repeated_ngram(words):
+        return True
+    if _is_prompt_echo(stripped, prompt):
         return True
     return False
+
+
+def _apply_quality_gate(segments: list) -> str:
+    """Drops segments the model itself flagged as low quality, then joins.
+
+    mlx-whisper computes avg_logprob / no_speech_prob / compression_ratio but
+    never rejects on them: compression_ratio_threshold only triggers a retry at
+    a higher temperature, and the last result is kept regardless. A prompt-echo
+    loop was measured at compression_ratio 14.54 against a sane ceiling of 2.4,
+    so the rejection has to happen here.
+    """
+    kept: list[str] = []
+    for seg in segments:
+        text = (seg.text or "").strip()
+        if not text:
+            continue
+        if seg.compression_ratio is not None and seg.compression_ratio > MAX_COMPRESSION_RATIO:
+            continue
+        if seg.avg_logprob is not None and seg.avg_logprob < MIN_AVG_LOGPROB:
+            continue
+        if (
+            seg.no_speech_prob is not None
+            and seg.no_speech_prob > MAX_NO_SPEECH_PROB
+            and seg.avg_logprob is not None
+            and seg.avg_logprob < WEAK_AVG_LOGPROB
+        ):
+            continue
+        kept.append(text)
+    return " ".join(kept).strip()
 
 
 # ---------------------------------------------------------------------------
 # Keyword helpers
 # ---------------------------------------------------------------------------
 
+@functools.lru_cache(maxsize=256)
 def _kw_pattern(kw: str) -> re.Pattern:
     return re.compile(r"\b" + re.escape(kw) + r"\b", re.IGNORECASE)
 
 
 def _has_keywords(text: str, keywords: list) -> bool:
     return any(_kw_pattern(kw).search(text) for kw in keywords)
+
+
+def _matched_keywords(text: str, keywords: list) -> list[str]:
+    return [kw for kw in keywords if _kw_pattern(kw).search(text)]
+
+
+# Alert tiers. EMERGENCY pings @here; INTEREST posts to #alerts silently;
+# NONE goes only to the station's own channel.
+TIER_NONE = 0
+TIER_INTEREST = 1
+TIER_EMERGENCY = 2
+
+
+def _keyword_tier(text: str) -> int:
+    if _has_keywords(text, KEYWORDS_EMERGENCY):
+        return TIER_EMERGENCY
+    if _has_keywords(text, KEYWORDS_INTEREST):
+        return TIER_INTEREST
+    return TIER_NONE
 
 
 def _apply_atc_corrections(text: str) -> str:
@@ -688,13 +1023,14 @@ def _post_telegram(message: str) -> None:
             _display_ref.log(Text(f"⚠ Telegram send failed: {exc}", style="dim yellow"))
 
 
-def _send_telegram(text: str, ts: str, icao: str, station_name: str, has_keywords: bool) -> None:
+def _send_telegram(text: str, ts: str, icao: str, station_name: str, tier: int) -> None:
     label = f"{icao} {station_name}"
-    header = (
-        f"\U0001f534 <b>[KEYWORD ALERT]</b> {label}"
-        if has_keywords
-        else f"\U0001f4fb {label}"
-    )
+    if tier == TIER_EMERGENCY:
+        header = f"\U0001f6a8 <b>[EMERGENCY]</b> {label}"
+    elif tier == TIER_INTEREST:
+        header = f"\U0001f534 <b>[ALERT]</b> {label}"
+    else:
+        header = f"\U0001f4fb {label}"
     _post_telegram(f"{header}\n<code>[{ts}]</code> {html.escape(text)}")
 
 
@@ -716,18 +1052,32 @@ _DISCORD_API = "https://discord.com/api/v10"
 
 
 class DiscordOutbox:
-    """Background sender for transcript posts so Discord cannot stall Whisper."""
+    """Background sender so Discord can never stall an audio or decode thread.
 
-    def __init__(self, maxsize: int = 100):
+    Everything the tracker sends goes through here. A connect/disconnect used to
+    do up to three blocking HTTP calls from inside _stream_loop, during which
+    LiveATCSource silently discards the oldest buffered MP3 bytes and corrupts
+    the decoder.
+    """
+
+    def __init__(self, maxsize: int = 200):
         self._queue: queue.Queue = queue.Queue(maxsize=maxsize)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._worker, daemon=True, name="discord-outbox")
         self._thread.start()
 
-    def submit(self, channel_id: str, content: Optional[str] = None, embed: Optional[dict] = None, priority: bool = False) -> None:
+    def submit(
+        self,
+        channel_id: str,
+        content: Optional[str] = None,
+        embed: Optional[dict] = None,
+        priority: bool = False,
+        message_id: Optional[str] = None,
+        allowed_mentions: Optional[dict] = None,
+    ) -> None:
         if not config.DISCORD_ENABLED or not channel_id:
             return
-        item = (channel_id, content, dict(embed) if embed else None)
+        item = (channel_id, content, dict(embed) if embed else None, message_id, allowed_mentions)
         try:
             self._queue.put_nowait(item)
             return
@@ -743,6 +1093,10 @@ class DiscordOutbox:
             if _display_ref is not None:
                 _display_ref.log(Text("⚠ Discord outbox full — dropping transcript post", style="dim yellow"))
 
+    @property
+    def depth(self) -> int:
+        return self._queue.qsize()
+
     def _worker(self) -> None:
         while not self._stop.is_set():
             try:
@@ -752,11 +1106,20 @@ class DiscordOutbox:
             if item is None:
                 self._queue.task_done()
                 break
-            channel_id, content, embed = item
+            channel_id, content, embed, message_id, allowed_mentions = item
             try:
-                _post_discord(channel_id, content=content, embed=embed)
+                if message_id:
+                    _edit_discord(channel_id, message_id, content=content, embed=embed)
+                else:
+                    _post_discord(
+                        channel_id, content=content, embed=embed,
+                        allowed_mentions=allowed_mentions,
+                    )
             finally:
                 self._queue.task_done()
+            # Discord allows ~5 messages / 5s per channel; a small gap keeps a
+            # busy airshow feed from spending its time in 429 retries.
+            self._stop.wait(0.25)
 
     def shutdown(self) -> None:
         self._stop.set()
@@ -777,9 +1140,11 @@ def _discord_channel_for(icao: str) -> str:
     return ""
 
 
-def _post_discord(channel_id: str, content: Optional[str] = None, embed: Optional[dict] = None) -> Optional[str]:
-    if not config.DISCORD_ENABLED or not channel_id:
-        return None
+def _discord_payload(
+    content: Optional[str],
+    embed: Optional[dict],
+    allowed_mentions: Optional[dict] = None,
+) -> dict:
     payload: dict = {}
     if content:
         payload["content"] = content[:2000]
@@ -788,12 +1153,17 @@ def _post_discord(channel_id: str, content: Optional[str] = None, embed: Optiona
         if embed.get("description"):
             embed["description"] = embed["description"][:4096]
         payload["embeds"] = [embed]
-    if not payload:
-        return None
+    if payload:
+        # Explicit by default: without this an embed containing "@everyone" in
+        # transcribed audio could ping the server.
+        payload["allowed_mentions"] = allowed_mentions or {"parse": []}
+    return payload
+
+
+def _discord_request(method: str, url: str, payload: dict, what: str) -> Optional[dict]:
     headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
-    url = f"{_DISCORD_API}/channels/{channel_id}/messages"
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=10)
+        resp = requests.request(method, url, json=payload, headers=headers, timeout=10)
         if resp.status_code == 429:
             retry_after = 1.0
             try:
@@ -801,26 +1171,74 @@ def _post_discord(channel_id: str, content: Optional[str] = None, embed: Optiona
             except Exception:
                 pass
             time.sleep(min(retry_after, 5.0) + 0.05)
-            resp = requests.post(url, json=payload, headers=headers, timeout=10)
+            resp = requests.request(method, url, json=payload, headers=headers, timeout=10)
         if resp.status_code >= 400:
             if _display_ref is not None:
                 _display_ref.log(Text(
-                    f"⚠ Discord send failed [{channel_id}]: HTTP {resp.status_code} {resp.text[:200]}",
+                    f"⚠ Discord {what} failed: HTTP {resp.status_code} {resp.text[:200]}",
                     style="dim yellow",
                 ))
             return None
-        return resp.json().get("id")
+        return resp.json()
     except Exception as exc:
         if _display_ref is not None:
-            _display_ref.log(Text(f"⚠ Discord send failed: {exc}", style="dim yellow"))
+            _display_ref.log(Text(f"⚠ Discord {what} failed: {exc}", style="dim yellow"))
         return None
 
 
-def _enqueue_discord(channel_id: str, content: Optional[str] = None, embed: Optional[dict] = None, priority: bool = False) -> None:
+def _post_discord(
+    channel_id: str,
+    content: Optional[str] = None,
+    embed: Optional[dict] = None,
+    allowed_mentions: Optional[dict] = None,
+) -> Optional[str]:
+    if not config.DISCORD_ENABLED or not channel_id:
+        return None
+    payload = _discord_payload(content, embed, allowed_mentions)
+    if not payload:
+        return None
+    data = _discord_request(
+        "POST", f"{_DISCORD_API}/channels/{channel_id}/messages", payload,
+        f"send [{channel_id}]",
+    )
+    return (data or {}).get("id")
+
+
+def _edit_discord(
+    channel_id: str,
+    message_id: str,
+    content: Optional[str] = None,
+    embed: Optional[dict] = None,
+) -> bool:
+    if not config.DISCORD_ENABLED or not channel_id or not message_id:
+        return False
+    payload = _discord_payload(content, embed)
+    if not payload:
+        return False
+    data = _discord_request(
+        "PATCH", f"{_DISCORD_API}/channels/{channel_id}/messages/{message_id}", payload,
+        f"edit [{channel_id}]",
+    )
+    return data is not None
+
+
+def _enqueue_discord(
+    channel_id: str,
+    content: Optional[str] = None,
+    embed: Optional[dict] = None,
+    priority: bool = False,
+    message_id: Optional[str] = None,
+    allowed_mentions: Optional[dict] = None,
+) -> None:
     if _discord_outbox is not None:
-        _discord_outbox.submit(channel_id, content=content, embed=embed, priority=priority)
+        _discord_outbox.submit(
+            channel_id, content=content, embed=embed, priority=priority,
+            message_id=message_id, allowed_mentions=allowed_mentions,
+        )
+    elif message_id:
+        _edit_discord(channel_id, message_id, content=content, embed=embed)
     else:
-        _post_discord(channel_id, content=content, embed=embed)
+        _post_discord(channel_id, content=content, embed=embed, allowed_mentions=allowed_mentions)
 
 
 def _pin_discord(channel_id: str, message_id: str) -> None:
@@ -842,53 +1260,71 @@ def _pin_discord(channel_id: str, message_id: str) -> None:
             _display_ref.log(Text(f"⚠ Discord pin failed: {exc}", style="dim yellow"))
 
 
-def _unpin_discord(channel_id: str, message_id: str) -> None:
-    if not config.DISCORD_ENABLED or not channel_id or not message_id:
-        return
-    headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
-    try:
-        requests.delete(
-            f"{_DISCORD_API}/channels/{channel_id}/pins/{message_id}",
-            headers=headers, timeout=10,
-        )
-    except Exception:
-        pass  # previous pin may already be gone (manually unpinned, channel pin limit, etc.)
+_TIER_COLOR = {
+    TIER_NONE: 0x2ECC71,        # green
+    TIER_INTEREST: 0xE67E22,    # orange
+    TIER_EMERGENCY: 0xE74C3C,   # red
+}
 
 
-def _send_discord(text: str, ts: str, ts_iso: str, icao: str, station_name: str, has_keywords: bool) -> None:
-    color = 0xE74C3C if has_keywords else 0x2ECC71
-    title = f"\U0001f534 {icao} {station_name}" if has_keywords else f"\U0001f4fb {icao} {station_name}"
+def _send_discord(
+    text: str,
+    ts: str,
+    ts_iso: str,
+    icao: str,
+    station_name: str,
+    tier: int,
+    recording: str = "",
+) -> None:
+    if tier == TIER_EMERGENCY:
+        title = f"\U0001f6a8 {icao} {station_name}"
+    elif tier == TIER_INTEREST:
+        title = f"\U0001f534 {icao} {station_name}"
+    else:
+        title = f"\U0001f4fb {icao} {station_name}"
     # "timestamp" drives Discord's own localized clock display in the embed —
     # set to when the transmission was received (ts_iso), not when this POST
     # happens, since transcription can lag behind receipt by several seconds.
-    embed = {"title": title, "description": text, "color": color, "footer": {"text": ts}, "timestamp": ts_iso}
+    footer = f"{ts} · {recording}" if recording else ts
+    embed = {
+        "title": title,
+        "description": text,
+        "color": _TIER_COLOR[tier],
+        "footer": {"text": footer},
+        "timestamp": ts_iso,
+    }
     channel_id = _discord_channel_for(icao)
     if channel_id:
         _enqueue_discord(channel_id, embed=dict(embed))
-    if has_keywords and DISCORD_ALERTS_CHANNEL_ID:
-        alert_embed = dict(embed)
-        alert_embed["title"] = f"\U0001f534 KEYWORD ALERT — {icao} {station_name}"
+    if tier == TIER_NONE or not DISCORD_ALERTS_CHANNEL_ID:
+        return
+
+    alert_embed = dict(embed)
+    if tier == TIER_EMERGENCY:
+        matched = ", ".join(_matched_keywords(text, KEYWORDS_EMERGENCY)) or "emergency"
+        alert_embed["title"] = f"\U0001f6a8 EMERGENCY — {icao} {station_name}"
+        _enqueue_discord(
+            DISCORD_ALERTS_CHANNEL_ID,
+            content=f"@here **{matched.upper()}** on {icao} {station_name}",
+            embed=alert_embed,
+            priority=True,
+            allowed_mentions={"parse": ["everyone"]},
+        )
+    else:
+        matched = ", ".join(_matched_keywords(text, KEYWORDS_INTEREST))
+        alert_embed["title"] = f"\U0001f534 {matched or 'ALERT'} — {icao} {station_name}"
         _enqueue_discord(DISCORD_ALERTS_CHANNEL_ID, embed=alert_embed, priority=True)
 
 
-def _send_discord_startup(state: SharedState) -> None:
-    ts = _now_ts()
-    for s in STREAMS:
-        enabled = state.is_enabled(s["icao"])
-        icon = "✅" if enabled else "\U0001f507"
-        embed = {
-            "title": f"{icon} {s['icao']} {s['name']}",
-            "description": f"ATC Tracker started — {'active' if enabled else 'muted'}",
-            "color": 0x2ECC71 if enabled else 0x95A5A6,
-            "footer": {"text": ts},
-        }
-        _post_discord(s.get("discord_channel_id", ""), embed=embed)
+def _send_discord_startup(state: SharedState, backend_name: str = "") -> None:
     lines = ["\U0001f7e2 **ATC Tracker started**", ""]
     for s in STREAMS:
         icon = "✅" if state.is_enabled(s["icao"]) else "\U0001f507"
         lines.append(f"{icon} {s['icao']} {s['name']}")
-    lines.append("\nSend `/help` for commands.")
-    _post_discord(DISCORD_COMMANDS_CHANNEL_ID, content="\n".join(lines))
+    if backend_name:
+        lines.append(f"\nSTT backend: `{backend_name}`")
+    lines.append("Send `/help` for commands.")
+    _enqueue_discord(DISCORD_COMMANDS_CHANNEL_ID, content="\n".join(lines))
 
 
 def _html_to_discord_md(html_text: str) -> str:
@@ -915,7 +1351,7 @@ def _broadcast_station_status(station: dict, enabled: bool) -> None:
         "color": 0x2ECC71 if enabled else 0x95A5A6,
         "footer": {"text": _now_ts()},
     }
-    _post_discord(channel_id, embed=embed)
+    _enqueue_discord(channel_id, embed=embed)
 
 
 def _broadcast_pause_status(paused: bool) -> None:
@@ -933,19 +1369,79 @@ def _broadcast_pause_status(paused: bool) -> None:
     for s in STREAMS:
         channel_id = s.get("discord_channel_id", "")
         if channel_id:
-            _post_discord(channel_id, embed=dict(embed))
+            _enqueue_discord(channel_id, embed=dict(embed))
 
 
-# Tracks the currently-pinned connection-status message per station channel,
-# so the previous one can be unpinned when a new one is pinned.
-_pinned_stream_status: dict = {}  # channel_id -> message_id
+# One long-lived status message per station channel, created and pinned once at
+# startup then edited in place. The previous design posted and pinned a fresh
+# message on every connect/disconnect, which spams the channel and walks into
+# Discord's hard cap of 50 pins per channel over a long event.
+_stream_status_message: dict = {}  # channel_id -> message_id
+
+
+_STATUS_TITLE_MARKER = "— Connected"
+_STATUS_TITLE_MARKERS = (_STATUS_TITLE_MARKER, "— Disconnected", "— Starting…")
+
+
+def _find_existing_status_message(channel_id: str) -> Optional[str]:
+    """Looks for a status message this bot already pinned in the channel.
+
+    Reusing it across restarts matters: creating a fresh one every startup would
+    still march towards Discord's 50-pin ceiling over a weekend of restarts,
+    just more slowly than the old post-per-transition behaviour did.
+    """
+    headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
+    for path in ("pins/messages", "pins"):
+        try:
+            resp = requests.get(f"{_DISCORD_API}/channels/{channel_id}/{path}",
+                                headers=headers, timeout=10)
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            items = data if isinstance(data, list) else data.get("items", [])
+            for item in items:
+                msg = item.get("message", item) if isinstance(item, dict) else {}
+                if not msg.get("author", {}).get("bot"):
+                    continue
+                for embed in msg.get("embeds", []):
+                    title = embed.get("title") or ""
+                    if any(marker in title for marker in _STATUS_TITLE_MARKERS):
+                        return msg.get("id")
+            return None
+        except Exception:
+            continue
+    return None
+
+
+def _init_stream_status_messages(state: SharedState) -> None:
+    """Establishes the per-station pinned status message, reusing the one from a
+    previous run when there is one. Runs at startup on the main thread, where
+    blocking on HTTP is harmless."""
+    if not config.DISCORD_ENABLED:
+        return
+    for station in STREAMS:
+        channel_id = station.get("discord_channel_id", "")
+        if not channel_id:
+            continue
+        embed = {
+            "title": f"⚪ {station['icao']} {station['name']} — Starting…",
+            "color": 0x95A5A6,
+            "footer": {"text": _now_ts()},
+        }
+        existing = _find_existing_status_message(channel_id)
+        if existing and _edit_discord(channel_id, existing, embed=embed):
+            _stream_status_message[channel_id] = existing
+            continue
+        message_id = _post_discord(channel_id, embed=embed)
+        if message_id:
+            _stream_status_message[channel_id] = message_id
+            _pin_discord(channel_id, message_id)
 
 
 def _broadcast_stream_status(station: dict, connected: bool, detail: str = "") -> None:
-    """Posts a connect/disconnect embed to a station's channel, and pins it —
-    unpinning the previous connection-status message first so only the current
-    one stays pinned. Called only on state transitions (not every reconnect
-    attempt) to avoid spamming the channel while a feed is persistently down."""
+    """Updates the station's pinned status message. Called on state transitions
+    only (not on every reconnect attempt), so a persistently down feed does not
+    generate traffic while it retries."""
     if not config.DISCORD_ENABLED:
         return
     channel_id = station.get("discord_channel_id", "")
@@ -960,17 +1456,17 @@ def _broadcast_stream_status(station: dict, connected: bool, detail: str = "") -
     else:
         embed = {
             "title": f"\U0001f534 {station['icao']} {station['name']} — Disconnected",
-            "description": f"{detail[:200]}\nReconnecting in {RECONNECT_DELAY_SEC}s…" if detail else f"Reconnecting in {RECONNECT_DELAY_SEC}s…",
+            "description": f"{detail[:200]}\nReconnecting…" if detail else "Reconnecting…",
             "color": 0xE74C3C,
             "footer": {"text": _now_ts()},
         }
-    message_id = _post_discord(channel_id, embed=embed)
+    message_id = _stream_status_message.get(channel_id)
     if message_id:
-        prev_id = _pinned_stream_status.get(channel_id)
-        if prev_id and prev_id != message_id:
-            _unpin_discord(channel_id, prev_id)
-        _pin_discord(channel_id, message_id)
-        _pinned_stream_status[channel_id] = message_id
+        _enqueue_discord(channel_id, embed=embed, message_id=message_id)
+    else:
+        # No pinned message (startup failed or Discord came up late) — fall back
+        # to a normal post rather than losing the status entirely.
+        _enqueue_discord(channel_id, embed=embed)
 
 
 # ---------------------------------------------------------------------------
@@ -1012,6 +1508,7 @@ def _handle_command(
         respond(
             "\U0001f4e1 <b>ATC Tracker commands</b>\n\n"
             "/status — show all station states\n"
+            "/health — connection & queue diagnostics\n"
             "/mute 1  or  /mute YBCG — mute a station\n"
             "/unmute 1  or  /unmute YBCG — unmute a station\n"
             "/mute all — mute every station\n"
@@ -1020,11 +1517,41 @@ def _handle_command(
             "/urls — show all stream URLs\n"
             "/seturl YBCG https://... — update a stream URL\n"
             "/reseturl YBCG — restore the default stream URL\n"
+            "/reconnect YBCG — force a station to reconnect\n"
+            "/vad YBCG 0.003 — show or set a station's VAD threshold\n"
+            "/record on|off — toggle transmission audio recording\n"
             "/keywords on|off — toggle keyword highlighting\n"
             "/pause — suspend all transcription & forwarding\n"
             "/resume — restart transcription & forwarding\n"
             "/help — this message"
         )
+
+    elif cmd == "health":
+        now = time.time()
+
+        def ago(when: Optional[float]) -> str:
+            return "never" if not when else f"{now - when:.0f}s ago"
+
+        lines = ["\U0001fa7a <b>Health</b>"]
+        for s in STREAMS:
+            h = state.health[s["icao"]]
+            icon = "\U0001f7e2" if h.connected else "\U0001f534"
+            lines.append(
+                f"{icon} <b>{s['icao']}</b> audio {ago(h.last_audio_at)} · "
+                f"last TX {ago(h.last_tx_at)} · reconnects {h.reconnects} · dropped {h.dropped}"
+            )
+            if h.active_url:
+                lines.append(f"   <code>{html.escape(h.active_url)}</code>")
+        if _transcriber_ref is not None:
+            lines.append(
+                f"\nTranscriber queue: <b>{_transcriber_ref.queue_depth}</b> · "
+                f"gated (hallucination/low quality): <b>{_transcriber_ref.gated}</b>"
+            )
+        if _discord_outbox is not None:
+            lines.append(f"Discord outbox: <b>{_discord_outbox.depth}</b>")
+        lines.append(f"Recording: <b>{'ON' if state.recording_enabled else 'OFF'}</b>")
+        lines.append(f"STT backend: <b>{_backend_name}</b>")
+        respond("\n".join(lines))
 
     elif cmd == "status":
         lines = ["\U0001f4e1 <b>Station status</b>"]
@@ -1121,11 +1648,60 @@ def _handle_command(
         if changed:
             tui(f"{source} → {station['icao']} stream URL reset; reconnecting")
 
+    elif cmd == "reconnect":
+        station = _resolve_station(arg)
+        if station is None:
+            respond(
+                f"Usage: /reconnect <code>YBCG</code>\n"
+                f"Use a number (1–{len(STREAMS)}) or ICAO code."
+            )
+            return
+        # Bumping the URL version is what the stream loop watches, so setting
+        # the URL to its current value is enough to make it cycle.
+        state.bump_stream_url_version(station["icao"])
+        respond(f"\U0001f504 {station['icao']} {station['name']} — reconnecting")
+        tui(f"{source} → {station['icao']} forced reconnect")
+
+    elif cmd == "vad":
+        station = _resolve_station(arg)
+        if station is None:
+            respond(
+                f"Usage: /vad <code>YBCG</code> or /vad <code>YBCG 0.004</code>\n"
+                f"Use a number (1–{len(STREAMS)}) or ICAO code."
+            )
+            return
+        icao = station["icao"]
+        if not rest:
+            respond(f"\U0001f39a {icao} VAD threshold: <b>{state.get_vad_threshold(icao):.5f}</b>")
+            return
+        try:
+            value = float(rest)
+        except ValueError:
+            respond(f"⚠ <code>{html.escape(rest)}</code> is not a number.")
+            return
+        if not 0.0 < value < 1.0:
+            respond("⚠ VAD threshold must be between 0 and 1 (typical range 0.001–0.02).")
+            return
+        state.set_vad_threshold(icao, value)
+        respond(f"\U0001f39a {icao} VAD threshold set to <b>{value:.5f}</b>")
+        tui(f"{source} → {icao} VAD threshold {value:.5f}")
+
+    elif cmd == "record":
+        if arg_l in ("on", "off"):
+            want = arg_l == "on"
+            state.set_recording(want)
+            respond(f"\U0001f3a4 Recording: <b>{'ON' if want else 'OFF'}</b>")
+            tui(f"{source} → recording {'ON' if want else 'OFF'}")
+        else:
+            respond(
+                f"Usage: /record on  or  /record off\n"
+                f"Currently: <b>{'ON' if state.recording_enabled else 'OFF'}</b>"
+            )
+
     elif cmd == "keywords":
         if arg_l in ("on", "off"):
             want = arg_l == "on"
-            with state._lock:
-                state.keywords_enabled = want
+            state.set_keywords(want)
             kw_label = "ON" if want else "OFF"
             respond(f"\U0001f50d Keywords: <b>{kw_label}</b>")
             tui(f"{source} → Keywords {kw_label}")
@@ -1136,8 +1712,7 @@ def _handle_command(
 
     elif cmd in ("pause", "resume"):
         want_paused = cmd == "pause"
-        with state._lock:
-            state.paused = want_paused
+        state.set_paused(want_paused)
         icon = "⏸" if want_paused else "▶️"
         label = "paused" if want_paused else "resumed"
         detail = "transcription & forwarding stopped" if want_paused else "transcription active"
@@ -1314,21 +1889,49 @@ def _keyboard_listener(state: SharedState) -> None:
 # Per-station stream loop (runs in its own thread)
 # ---------------------------------------------------------------------------
 
+def _candidate_urls(stream_cfg: dict, state: SharedState, attempt: int) -> str:
+    """Rotates through the redirector then the known edge hosts.
+
+    A user-set /seturl or STREAM_URL_<ICAO> override is never second-guessed —
+    if someone pinned a URL, that is the URL we use.
+    """
+    icao = stream_cfg["icao"]
+    url = state.get_stream_url(icao)
+    if state.has_stream_override(icao):
+        return url
+    ladder = [url] + [u for u in stream_cfg.get("fallback_urls", []) if u != url]
+    return ladder[attempt % len(ladder)]
+
+
 def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState) -> None:
     icao = stream_cfg["icao"]
     station_name = stream_cfg["name"]
     headers = stream_cfg["headers"]
+    health = state.health[icao]
 
     def tui_log(line: Text) -> None:
         if state.display:
             state.display.log(line)
 
+    def flush_tx(buf: TransmissionBuffer) -> None:
+        raw, preroll = buf.flush()
+        if not len(raw):
+            return
+        audio = _preprocessor.process(raw, preroll_samples=preroll)
+        if state.is_enabled(icao) and not state.paused:
+            transcriber.submit(
+                audio, raw, len(audio) / VAD_SAMPLE_RATE,
+                icao, station_name, _now_ts(), _now_iso(),
+            )
+
     was_connected = False
+    failures = 0
 
     while not state.stop_event.is_set():
         source: Optional[LiveATCSource] = None
         try:
-            url, url_version = state.get_stream_url_snapshot(icao)
+            url_version = state.get_stream_url_version(icao)
+            url = _candidate_urls(stream_cfg, state, failures)
             source = LiveATCSource(url, headers)
 
             pcm_gen = miniaudio.stream_any(
@@ -1340,19 +1943,23 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
                 frames_to_read=VAD_CHUNK_FRAMES,
             )
 
-            vad = VoiceActivityDetector()
+            vad = VoiceActivityDetector(threshold=state.get_vad_threshold(icao))
             buf = TransmissionBuffer()
             in_tx = False
-            silence_since: Optional[float] = None
+            silent_samples = 0
+            last_threshold_check = 0.0
 
             ts = _now_ts()
             line = Text()
             line.append(f"[{ts}] {icao} {station_name:<16}  ", style="bold green")
-            line.append("│ Connected", style="green")
+            line.append(f"│ Connected  {source.resolved_url}", style="green")
             tui_log(line)
+            health.connected = True
+            health.active_url = source.resolved_url
             if not was_connected:
                 _broadcast_stream_status(stream_cfg, connected=True)
                 was_connected = True
+            failures = 0
 
             url_changed = False
             for raw_chunk in pcm_gen:
@@ -1363,44 +1970,61 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
                     tui_log(Text(f"↻ {icao}: stream URL changed — reconnecting", style="cyan"))
                     break
 
+                now = time.monotonic()
+                # (A stalled feed is detected inside LiveATCSource.read, which is
+                # where the blocking actually happens.)
+                if now - last_threshold_check > 1.0:
+                    vad.set_base_threshold(state.get_vad_threshold(icao))
+                    last_threshold_check = now
+
+                health.last_audio_at = time.time()
                 chunk = np.frombuffer(bytes(raw_chunk), dtype=np.int16).astype(np.float32) / 32768.0
 
                 if vad.is_speech(chunk):
                     in_tx = True
-                    silence_since = None
+                    silent_samples = 0
                     buf.append(chunk)
                     if buf.duration_seconds > MAX_TRANSMISSION_SEC:
-                        audio = _preprocessor.process(buf.flush())
-                        if state.is_enabled(icao) and not state.paused:
-                            ts = _now_ts()
-                            ts_iso = _now_iso()
-                            transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts, ts_iso)
+                        flush_tx(buf)
                 else:
                     if in_tx:
                         buf.append(chunk)
-                        now = time.monotonic()
-                        if silence_since is None:
-                            silence_since = now
-                        elif now - silence_since >= VAD_SILENCE_HANGOVER:
-                            audio = _preprocessor.process(buf.flush())
-                            if state.is_enabled(icao) and not state.paused:
-                                ts = _now_ts()
-                                ts_iso = _now_iso()
-                                transcriber.submit(audio, len(audio) / VAD_SAMPLE_RATE, icao, station_name, ts, ts_iso)
+                        # Measured in audio, not wall-clock. miniaudio delivers
+                        # decoded chunks in bursts out of its buffer, so seconds
+                        # of silent audio can arrive within milliseconds of real
+                        # time — a wall-clock hangover simply never fires during
+                        # a burst, and consecutive radio calls get glued into one
+                        # transmission.
+                        silent_samples += len(chunk)
+                        if silent_samples >= VAD_SILENCE_HANGOVER * VAD_SAMPLE_RATE:
+                            flush_tx(buf)
                             in_tx = False
-                            silence_since = None
+                            silent_samples = 0
+                    else:
+                        buf.observe_silence(chunk)
 
             if url_changed:
                 was_connected = False
+                failures = 0
 
         except Exception as exc:
             if not state.stop_event.is_set():
+                failures += 1
+                health.connected = False
+                health.reconnects += 1
+                # Exponential backoff with jitter, so three feeds that all lose
+                # their edge at once don't retry in lockstep forever.
+                delay = min(
+                    RECONNECT_MAX_DELAY_SEC,
+                    RECONNECT_DELAY_SEC * (2 ** min(failures - 1, 4)),
+                )
+                delay += random.uniform(0, delay * 0.25)
                 tui_log(Text(f"⚠ {icao}: {exc}", style="red"))
-                tui_log(Text(f"  Reconnecting in {RECONNECT_DELAY_SEC}s…", style="dim"))
+                tui_log(Text(f"  Reconnecting in {delay:.0f}s…", style="dim"))
                 if was_connected:
                     _broadcast_stream_status(stream_cfg, connected=False, detail=str(exc))
                     was_connected = False
-                state.stop_event.wait(RECONNECT_DELAY_SEC)
+                state.stop_event.wait(delay)
         finally:
             if source:
                 source.close()
@@ -1410,27 +2034,76 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
 # Model download check
 # ---------------------------------------------------------------------------
 
-def _ensure_model(model: str, console: Console) -> None:
-    from huggingface_hub import snapshot_download
-    from huggingface_hub.utils import disable_progress_bars, enable_progress_bars
-
-    console.print(f"[dim]Checking model {model}...[/dim]")
+def _check_prompt_lengths(console: Console) -> None:
+    """Whisper silently truncates an oversized prompt to its tail. A single
+    shared 232-token prompt once got cut down to its Southport section, so every
+    station was conditioned on Southport phraseology and echoed it into
+    transcripts. This is the check that would have caught it."""
     try:
-        snapshot_download(repo_id=model, local_files_only=True)
-        console.print("[green]✓ Model already cached — ready[/green]")
+        from mlx_whisper.tokenizer import get_tokenizer
+        tokenizer = get_tokenizer(multilingual=True, language="en", task="transcribe")
     except Exception:
-        console.print(f"[yellow]Downloading {model} (∼480 MB) — please wait…[/yellow]")
-        try:
-            disable_progress_bars()
-            snapshot_download(repo_id=model)
-            enable_progress_bars()
-            console.print("[green]✓ Model downloaded successfully[/green]")
-        except Exception as exc:
-            enable_progress_bars()
+        return  # tokenizer unavailable (e.g. parakeet-only run) — skip silently
+    for s in STREAMS:
+        prompt = s.get("prompt", "")
+        if not prompt:
+            continue
+        n = len(tokenizer.encoding.encode(" " + prompt.strip()))
+        if n > config.MAX_PROMPT_TOKENS:
             console.print(
-                f"[red]Download failed: {exc}\n"
-                "  Make sure HUGGINGFACE_TOKEN is set in .env and you have internet access.[/red]"
+                f"[red]⚠ {s['icao']} prompt is {n} tokens (max {config.MAX_PROMPT_TOKENS}).\n"
+                "  Whisper keeps only the tail of an oversized prompt and will echo it "
+                "into transcripts. Shorten it in config.py.[/red]"
             )
+
+
+def _preflight_streams(state: SharedState, console: Console) -> list[str]:
+    """Checks every feed before the UI takes over the terminal, so a dead
+    station is obvious at launch rather than halfway through the show."""
+    results: list[str] = []
+    console.print("[dim]Checking streams...[/dim]")
+    for s in STREAMS:
+        icao = s["icao"]
+        url = state.get_stream_url(icao)
+        try:
+            with requests.get(
+                url, headers=s["headers"], stream=True, timeout=12, allow_redirects=True
+            ) as resp:
+                name = resp.headers.get("icy-name", "")
+                if resp.status_code == 200:
+                    console.print(
+                        f"[green]  ✓ {icao} {s['name']} — {name or 'live'}[/green] "
+                        f"[dim]{resp.url}[/dim]"
+                    )
+                    results.append(f"✅ {icao} {s['name']} — {name or 'live'}")
+                else:
+                    console.print(f"[red]  ✗ {icao} {s['name']} — HTTP {resp.status_code}[/red]")
+                    results.append(f"❌ {icao} {s['name']} — HTTP {resp.status_code}")
+        except Exception as exc:
+            console.print(f"[red]  ✗ {icao} {s['name']} — {exc}[/red]")
+            results.append(f"❌ {icao} {s['name']} — {str(exc)[:80]}")
+    return results
+
+
+def _prune_recordings(recordings_dir: Path, retention_days: int, console: Console) -> None:
+    if retention_days <= 0 or not recordings_dir.exists():
+        return
+    cutoff = (datetime.now(timezone.utc).astimezone(_AEST) - timedelta(days=retention_days)).date()
+    removed = 0
+    for day_dir in recordings_dir.iterdir():
+        if not day_dir.is_dir():
+            continue
+        try:
+            day = datetime.strptime(day_dir.name, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if day < cutoff:
+            for f in day_dir.iterdir():
+                f.unlink(missing_ok=True)
+                removed += 1
+            day_dir.rmdir()
+    if removed:
+        console.print(f"[dim]Pruned {removed} recordings older than {retention_days} days[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -1439,9 +2112,10 @@ def _ensure_model(model: str, console: Console) -> None:
 
 def _calibrate(console: Console, stream_cfg: dict) -> None:
     icao = stream_cfg["icao"]
+    threshold = stream_cfg.get("vad_threshold", VAD_RMS_THRESHOLD)
     console.print(
         f"[cyan]Calibrate — {icao} {stream_cfg['name']} — printing live RMS for 15s.\n"
-        "Silence ≈ 0.000; transmissions spike above 0.003. Ctrl+C to stop.[/cyan]"
+        f"Silence ≈ 0.000; transmissions spike above {threshold}. Ctrl+C to stop.[/cyan]"
     )
     source = LiveATCSource(stream_cfg["url"], stream_cfg["headers"])
     pcm_gen = miniaudio.stream_any(
@@ -1458,7 +2132,7 @@ def _calibrate(console: Console, stream_cfg: dict) -> None:
             chunk = np.frombuffer(bytes(raw_chunk), dtype=np.int16).astype(np.float32) / 32768.0
             rms = float(np.sqrt(np.mean(chunk ** 2)))
             bar = "█" * min(60, int(rms * 5000))
-            flag = " ← TX" if rms > VAD_RMS_THRESHOLD else ""
+            flag = " ← TX" if rms > threshold else ""
             console.print(f"RMS {rms:.5f}  {bar}{flag}", highlight=False)
             if time.monotonic() > deadline:
                 break
@@ -1477,9 +2151,13 @@ def main() -> None:
         description="ATC Tracker — multi-station live speech-to-text transcription"
     )
     parser.add_argument("--model", default=None, metavar="REPO",
-                        help="Whisper model repo")
+                        help="Model repo (defaults to the backend's own default)")
+    parser.add_argument("--stt", default=None, choices=["whisper", "parakeet"],
+                        help="Speech-to-text backend (default from STT_BACKEND, else whisper)")
     parser.add_argument("--no-keywords", action="store_true",
                         help="Start with keyword highlighting disabled")
+    parser.add_argument("--no-recording", action="store_true",
+                        help="Do not save transmission audio to recordings/")
     parser.add_argument("--stations", nargs="+", metavar="ICAO",
                         help="Start only these stations, e.g. --stations YBCG YSPT")
     parser.add_argument("--calibrate", default=None, metavar="ICAO",
@@ -1497,7 +2175,16 @@ def main() -> None:
         _calibrate(console, matches[0])
         return
 
-    model = args.model or WHISPER_MODEL
+    global _backend_name
+    _backend_name = args.stt or config.STT_BACKEND
+    try:
+        backend = transcription.build_backend(_backend_name, args.model)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+    model = args.model or (
+        WHISPER_MODEL if _backend_name == "whisper" else config.PARAKEET_MODEL
+    )
 
     runtime_config = RuntimeConfig(Path(__file__).parent / "runtime_config.json")
     state = SharedState(keywords_enabled=not args.no_keywords, runtime_config=runtime_config)
@@ -1521,19 +2208,35 @@ def main() -> None:
             "  Add your token to .env (see .env.example for instructions).[/yellow]"
         )
 
-    _ensure_model(model, console)
+    _check_prompt_lengths(console)
+    backend.ensure_ready(log=lambda msg: console.print(f"[dim]{msg}[/dim]"))
+
+    if args.no_recording:
+        state.set_recording(False)
+
+    preflight = _preflight_streams(state, console)
 
     log_dir = Path(__file__).parent / "logs"
     log_dir.mkdir(exist_ok=True)
     log_file = log_dir / f"atc_{datetime.now(timezone.utc).astimezone(_AEST).strftime('%Y-%m-%d')}.log"
 
+    recordings_dir = Path(__file__).parent / "recordings"
+    if state.recording_enabled:
+        recordings_dir.mkdir(exist_ok=True)
+        _prune_recordings(recordings_dir, config.RECORDING_RETENTION_DAYS, console)
+
     global _display_ref
-    display = LiveDisplay(model, state, console)
+    display = LiveDisplay(f"{model}  [{_backend_name}]", state, console)
     state.display = display
     _display_ref = display
 
+    # Blocking HTTP, so it runs before the render loop starts — but after
+    # _display_ref is set, so a permissions failure is reported rather than
+    # silently swallowed.
+    _init_stream_status_messages(state)
+
     with display:
-        global _discord_outbox
+        global _discord_outbox, _transcriber_ref
         if config.DISCORD_ENABLED:
             _discord_outbox = DiscordOutbox()
 
@@ -1542,7 +2245,10 @@ def main() -> None:
         )
         kb_thread.start()
 
-        transcriber = Transcriber(model, state, log_file=log_file)
+        transcriber = Transcriber(
+            backend, state, log_file=log_file, recordings_dir=recordings_dir,
+        )
+        _transcriber_ref = transcriber
 
         for stream_cfg in STREAMS:
             t = threading.Thread(
@@ -1574,7 +2280,13 @@ def main() -> None:
 
         _send_startup_notification(state)
         if config.DISCORD_ENABLED:
-            _send_discord_startup(state)
+            _send_discord_startup(state, backend_name=_backend_name)
+            failed = [line for line in preflight if line.startswith("❌")]
+            if failed:
+                _enqueue_discord(
+                    DISCORD_COMMANDS_CHANNEL_ID,
+                    content="⚠️ **Stream preflight**\n" + "\n".join(preflight),
+                )
 
         try:
             state.stop_event.wait()
