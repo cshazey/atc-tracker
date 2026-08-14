@@ -399,7 +399,17 @@ Aircraft draw as their actual type: a C-17 gets the C-17 silhouette, a Hercules 
 
 `data/adsb_marker_shapes.json` is plain data, so you can retype an aircraft by editing it — `"P40": ["hi_perf", 1.0]` points the Kittyhawk at the single-seat-fighter silhouette. Roughly 70 designators are this project's own additions (listed under `_extra_mappings`), mostly airshow warbirds and local GA types tar1090 leaves to the emitter category. `test_adsb.py` checks that every mapping names a shape that exists and that every type the classifier can flag has one, so a typo fails the tests rather than silently drawing nothing.
 
-`ADSB_WEB_BIND=0.0.0.0` makes it reachable over Tailscale, but also exposes it to every other interface on the machine. To keep it Tailnet-only, bind to the host's own `100.x.y.z` Tailscale address, or leave it on loopback and run `tailscale serve 8099`. `ADSB_WEB_TOKEN` adds a shared secret on top.
+Set `ADSB_WEB_BIND=tailscale` (the default in `.env.example`) and it listens on this machine's Tailnet address **and** loopback — reachable from your phone, invisible to whatever network the machine is plugged into. The Tailscale address is found at startup by scanning for a `100.64/10` interface, so it works wherever the `tailscale` binary happens to be installed, and both URLs are printed by `run.command`, logged in the terminal, and posted to `#commands` when the tracker starts. `0.0.0.0` still works if you want it, with a warning. `ADSB_WEB_TOKEN` adds a shared secret on top.
+
+## Auto-update
+
+`run.command` is a supervisor. It starts the tracker as a child process and checks `origin/main` once a minute; when new commits land it pulls, posts a summary to `#commands`, and restarts the tracker. **The supervisor itself never restarts** — so a bad commit can't leave you with a launcher that won't start. A failed pull (dirty tree, diverged branch) leaves the running tracker alone and says so rather than killing it. It also restarts the tracker if it crashes, with a 10-second backoff.
+
+```bash
+AUTO_UPDATE=0 bash run.command      # supervise, never pull
+NO_SUPERVISOR=1 bash run.command    # old behaviour: run the tracker directly
+UPDATE_INTERVAL=300 bash run.command
+```
 
 ---
 
