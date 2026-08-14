@@ -103,6 +103,8 @@ venv/bin/python atc_tracker.py
 
 On **first run**, `run.command` automatically creates a venv and installs all dependencies. The model (~1.6 GB for Whisper large-v3-turbo, ~600 MB for Parakeet) downloads at startup and is cached in `~/.cache/huggingface/`.
 
+`run.command` is a supervisor: it starts the tracker as a child, watches `origin/main` once a minute, and when new commits land it pulls, posts a summary to `#commands`, and restarts the tracker — while the supervisor itself keeps running, so a bad commit can never leave a launcher that will not start. A failed pull (dirty tree, diverged branch) leaves the running tracker alone. It also restarts the tracker on a crash with a 10-second backoff. Use `AUTO_UPDATE=0 bash run.command` to supervise without pulling, or `NO_SUPERVISOR=1 bash run.command` to run the tracker directly.
+
 Startup runs a preflight check against all three feeds and prints ✓/✗ per station before the UI takes over the terminal, so a dead feed is visible immediately rather than halfway through an event.
 
 ### Background (headless)
@@ -242,7 +244,7 @@ venv/bin/python adsb_tracker.py --dry-run   # run the loop, print what it would 
 
 **Files:** `adsb_source.py` (HTTP, rate limit, failover) · `adsb_classify.py` (pure classifier) · `adsb_tracker.py` (state machine + poll thread; `poll_once()` is the pure, testable core) · `adsb_store.py` (SQLite) · `adsb_web.py` (optional map) · `geo.py`. Tests: `venv/bin/python test_adsb.py` — no network, no threads, no writes outside a temp dir.
 
-**Map.** `ADSB_WEB_ENABLED=1` serves a live map on `http://localhost:8099`. Read-only (GET/HEAD only, no filesystem serving). Aircraft draw as their real type silhouette, rotated to track, using tar1090's shape set in `data/adsb_marker_shapes.json` — **that file is GPL-2.0-or-later**, unlike the rest of the repo; the notice is inside it. `ADSB_WEB_BIND=0.0.0.0` reaches it over Tailscale but exposes it to every interface — prefer binding the host's `100.x.y.z` Tailscale address, or `tailscale serve 8099` from loopback.
+**Map.** `ADSB_WEB_ENABLED=1` serves a live map on port `8099`. Read-only (GET/HEAD only, no filesystem serving). Aircraft draw as their real type silhouette, rotated to track, using tar1090's shape set in `data/adsb_marker_shapes.json` — **that file is GPL-2.0-or-later**, unlike the rest of the repo; the notice is inside it. `ADSB_WEB_BIND=tailscale` (the default in `.env.example`) listens on this host's `100.64/10` Tailnet address **and** loopback — reachable from your phone, invisible to the local network. The address is detected at startup by scanning the interfaces, so the Mac mini resolves its own; both URLs are printed by `run.command`, logged in the terminal, and posted to `#commands` when the tracker starts. `0.0.0.0` still works, with a warning; `ADSB_WEB_TOKEN` adds a shared secret on top.
 
 **Off switches:** `ADSB_ENABLED=0`, `--no-adsb`, or `/adsb off` at runtime.
 

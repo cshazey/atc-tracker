@@ -14,17 +14,20 @@ Security posture, because this is the one component that listens on a socket:
   * Optional shared-secret token via ADSB_WEB_TOKEN.
   * Bound to 127.0.0.1 by default.
 
-On ADSB_WEB_BIND: setting it to 0.0.0.0 makes the page reachable over
-Tailscale, which is the usual reason to want it — but it also exposes it to
-every other interface on the host. Binding to the machine's own 100.x.y.z
-Tailscale address, or leaving it on loopback behind `tailscale serve`, gets the
-same reachability without the extra exposure.
+ADSB_WEB_BIND takes a literal address, or the word "tailscale". The latter is
+the setting worth using: it listens on this host's 100.x Tailnet address AND on
+loopback, and on nothing else — reachable from your other devices, invisible to
+whatever network the machine happens to be plugged into. 0.0.0.0 still works if
+you want it, with a warning at startup.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
+import socket
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -374,29 +377,146 @@ class _Handler(BaseHTTPRequestHandler):
         return self.poller.store.recent_events(50)
 
 
+def tailscale_ip() -> str:
+    """This host's Tailscale address, or "" if it has none.
+
+    Tailscale hands out addresses from the 100.64.0.0/10 CGNAT range, so
+    scanning the interface list is more reliable than shelling out to the
+    `tailscale` binary — which lives in three different places on macOS
+    depending on whether it came from the App Store, Homebrew, or the
+    standalone package.
+    """
+    try:
+        out = subprocess.run(
+            ["ifconfig"], capture_output=True, text=True, timeout=5
+        ).stdout
+    except Exception:
+        return ""
+    for m in re.finditer(r"inet (100\.(\d+)\.\d+\.\d+)", out):
+        second = int(m.group(2))
+        if 64 <= second <= 127:          # 100.64/10, not 100.0/8 generally
+            return m.group(1)
+    return ""
+
+
+def resolve_bind() -> tuple:
+    """Turn ADSB_WEB_BIND into (address, note).
+
+    Supports the literal "tailscale", which resolves to this host's Tailscale
+    address. That is the setting worth wanting: reachable from your other
+    devices, invisible to the coffee-shop wifi. See bind_addresses(), which
+    pairs it with loopback. Falls back to loopback rather than to 0.0.0.0 if
+    Tailscale is not up, because silently binding to every interface is not a
+    reasonable thing to do on someone's behalf.
+    """
+    want = (config.ADSB_WEB_BIND or "").strip()
+    if want.lower() not in ("tailscale", "ts"):
+        return want or "127.0.0.1", ""
+    ip = tailscale_ip()
+    if ip:
+        return ip, "reachable on your Tailnet and on this machine — not on the local network"
+    return "127.0.0.1", "Tailscale not detected — bound to loopback instead"
+
+
+def access_urls(bound: str) -> list:
+    """Every URL this dashboard can actually be reached on."""
+    port = config.ADSB_WEB_PORT
+    token = f"?token={config.ADSB_WEB_TOKEN}" if config.ADSB_WEB_TOKEN else ""
+    urls = []
+    if bound in ("0.0.0.0", "::", ""):
+        urls.append(f"http://localhost:{port}/{token}")
+        ts = tailscale_ip()
+        if ts:
+            urls.append(f"http://{ts}:{port}/{token}   (Tailscale)")
+        try:
+            lan = socket.gethostbyname(socket.gethostname())
+            if lan and not lan.startswith("127."):
+                urls.append(f"http://{lan}:{port}/{token}   (LAN)")
+        except Exception:
+            pass
+    elif bound.startswith("100."):
+        urls.append(f"http://{bound}:{port}/{token}   (Tailscale)")
+    elif bound.startswith("127."):
+        urls.append(f"http://localhost:{port}/{token}")
+    else:
+        urls.append(f"http://{bound}:{port}/{token}")
+    return urls
+
+
+def bind_addresses() -> tuple:
+    """Every address to listen on, plus a note. Usually one; two for Tailscale.
+
+    Binding to the Tailscale address alone is the safe choice, but it also
+    means the machine running the tracker cannot open the map on localhost —
+    which is exactly where you are when you are looking at the terminal. So
+    "tailscale" listens on both the Tailnet address and loopback, and on
+    nothing else. 0.0.0.0 remains available for anyone who wants it.
+    """
+    bind, note = resolve_bind()
+    if bind.startswith("100.") and 64 <= int(bind.split(".")[1]) <= 127:
+        return ("127.0.0.1", bind), note
+    return (bind,), note
+
+
 def serve(poller, stop_event=None, on_log=None) -> None:
     """Run the dashboard until stop_event is set. Intended as a thread body."""
     handler = type("_BoundHandler", (_Handler,), {"poller": poller})
-    try:
-        httpd = ThreadingHTTPServer((config.ADSB_WEB_BIND, config.ADSB_WEB_PORT), handler)
-    except OSError as exc:
-        if on_log:
-            on_log(f"ADS-B map could not start on port {config.ADSB_WEB_PORT}: {exc}", True)
-        return
-    httpd.daemon_threads = True
+    addresses, note = bind_addresses()
 
-    where = config.ADSB_WEB_BIND
+    servers = []
+    for addr in addresses:
+        try:
+            httpd = ThreadingHTTPServer((addr, config.ADSB_WEB_PORT), handler)
+            httpd.daemon_threads = True
+            servers.append((addr, httpd))
+        except OSError as exc:
+            if on_log:
+                on_log(
+                    f"ADS-B map could not listen on {addr}:{config.ADSB_WEB_PORT}: {exc}",
+                    True,
+                )
+    if not servers:
+        return
+
     if on_log:
-        note = "" if config.ADSB_WEB_TOKEN else " (no token set)"
-        on_log(f"ADS-B map on http://{where}:{config.ADSB_WEB_PORT}/{note}")
+        for addr, _ in servers:
+            for url in access_urls(addr):
+                on_log(f"ADS-B map  →  {url}")
+        if note:
+            on_log(f"ADS-B map  {note}")
+        if any(a in ("0.0.0.0", "::") for a, _ in servers):
+            on_log(
+                "ADS-B map is bound to every interface. Set ADSB_WEB_BIND=tailscale "
+                "to restrict it to your Tailnet plus loopback.",
+                True,
+            )
+        if not config.ADSB_WEB_TOKEN and any(
+            not a.startswith("127.") for a, _ in servers
+        ):
+            on_log("ADS-B map has no ADSB_WEB_TOKEN set — anyone who can reach "
+                   "the port can view it.", True)
 
     if stop_event is not None:
         threading.Thread(
-            target=lambda: (stop_event.wait(), httpd.shutdown()),
+            target=lambda: (
+                stop_event.wait(),
+                [s.shutdown() for _, s in servers],
+            ),
             daemon=True,
             name="adsb-web-stop",
         ).start()
+
+    # Each listener needs its own serve_forever; run all but the last on their
+    # own threads and keep this one for the last so serve() still blocks.
+    for addr, httpd in servers[:-1]:
+        threading.Thread(
+            target=httpd.serve_forever,
+            kwargs={"poll_interval": 0.5},
+            daemon=True,
+            name=f"adsb-web-{addr}",
+        ).start()
     try:
-        httpd.serve_forever(poll_interval=0.5)
+        servers[-1][1].serve_forever(poll_interval=0.5)
     finally:
-        httpd.server_close()
+        for _, httpd in servers:
+            httpd.server_close()

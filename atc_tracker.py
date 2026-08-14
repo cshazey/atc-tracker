@@ -1742,6 +1742,38 @@ def _broadcast_adsb_board(board: dict) -> None:
         _enqueue_discord(channel_id, embed=embed)
 
 
+def _announce_map_urls() -> None:
+    """Post the live map's reachable addresses to #commands on startup.
+
+    The Tailscale address is the useful one and is only knowable at runtime —
+    it depends on which machine this is and whether Tailscale is up — so it
+    goes out with every start rather than being written down anywhere.
+    """
+    addresses, note = adsb_web.bind_addresses()
+    urls = [u for addr in addresses for u in adsb_web.access_urls(addr)]
+    if not urls:
+        return
+    lines = [f"[{u.split()[0]}]({u.split()[0]})" + (f" — {' '.join(u.split()[1:])}"
+             if len(u.split()) > 1 else "") for u in urls]
+    body = "\n".join(lines)
+    if note:
+        body += f"\n\n*{note}*"
+    if not config.ADSB_WEB_TOKEN and any(not a.startswith("127.") for a in addresses):
+        body += "\n\n⚠️ No `ADSB_WEB_TOKEN` set — anyone who can reach the port can view it."
+    _enqueue_discord(
+        DISCORD_COMMANDS_CHANNEL_ID,
+        embed={
+            "title": "\U0001f5fa️ Live aircraft map is up",
+            "description": body,
+            "color": 0x3498DB,
+            "footer": {"text": _now_ts()},
+        },
+    )
+    if _display_ref is not None:
+        for u in urls:
+            _display_ref.log(Text(f"🗺  map  →  {u}", style="bold cyan"))
+
+
 def _init_adsb_board_messages(state: SharedState) -> None:
     """Create or adopt the pinned ADS-B board. Main thread, startup only."""
     if not (config.DISCORD_ENABLED and config.ADSB_ENABLED):
@@ -2877,6 +2909,7 @@ def main() -> None:
                     daemon=True,
                     name="adsb-web",
                 ).start()
+                _announce_map_urls()
 
         _send_startup_notification(state)
         if config.DISCORD_ENABLED:
