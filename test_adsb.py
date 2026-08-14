@@ -428,6 +428,29 @@ check("...and never reports an exit", kinds(evs).count(T.EV_BOX_EXIT), 0)
 evs = drive(p, [[outside()]] * 6, start=1_000_400.0)
 check("...but a clean departure does report an exit", kinds(evs).count(T.EV_BOX_EXIT), 1)
 
+# Ceiling: the box is a volume. An airliner routed over the strip at cruise is
+# not in the display, and gating occupancy on ADSB_BOX_CEILING_FT is what stops
+# every one of them firing a box entry.
+p = make_poller()
+check("box holds a contact at the ceiling", p._inside_box(BOX_LAT, BOX_LON, 10000, strict=True), True)
+check("box rejects a contact above the ceiling", p._inside_box(BOX_LAT, BOX_LON, 10001, strict=True), False)
+check("box keeps a contact whose altitude is unknown", p._inside_box(BOX_LAT, BOX_LON, None, strict=True), True)
+
+over_high = lambda: mil_rep(lat=BOX_LAT, lon=BOX_LON, alt_ft=25000, gs_kt=450.0)
+p = make_poller()
+evs = drive(p, [[outside()], [outside()]] + [[over_high()]] * 8)
+check("an airliner overflying the box above the ceiling never enters", kinds(evs).count(T.EV_BOX_ENTER), 0)
+
+# Same ground track, but descending through the ceiling into the display.
+p = make_poller()
+evs = drive(p, [[outside()], [outside()]] + [[over_high()]] * 4 + [[inside()]] * 6)
+check("a contact that descends below the ceiling then enters", kinds(evs).count(T.EV_BOX_ENTER), 1)
+
+# A display aircraft that climbs out through the ceiling leaves the box.
+p = make_poller()
+evs = drive(p, [[outside()], [outside()]] + [[inside()]] * 6 + [[over_high()]] * 6)
+check("a box contact that climbs through the ceiling leaves", kinds(evs).count(T.EV_BOX_EXIT), 1)
+
 
 # --- emergencies -----------------------------------------------------------
 
