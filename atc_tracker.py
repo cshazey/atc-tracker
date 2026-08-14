@@ -42,7 +42,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+import adsb_classify
+import adsb_tracker
+import adsb_web
 import config
+import geo
 import military_callsigns
 import transcription
 from config import (
@@ -1179,6 +1183,9 @@ class DiscordOutbox:
 
 
 _discord_outbox: Optional[DiscordOutbox] = None
+# Set in main(). Module-level so _handle_command can reach it, the same way it
+# reaches _transcriber_ref and _discord_outbox.
+_adsb_poller: Optional["adsb_tracker.AdsbPoller"] = None
 
 
 def _discord_channel_for(icao: str) -> str:
@@ -1389,6 +1396,9 @@ def _html_to_discord_md(html_text: str) -> str:
     """Convert the small HTML subset Telegram replies use into Discord markdown."""
     out = html_text.replace("<b>", "**").replace("</b>", "**")
     out = out.replace("<code>", "`").replace("</code>", "`")
+    # <pre> carries the aircraft tables, which only line up in a monospaced
+    # block. Telegram renders the tag directly; Discord needs a fence.
+    out = out.replace("<pre>", "```\n").replace("</pre>", "\n```")
     return html.unescape(out)
 
 
@@ -1441,12 +1451,18 @@ _STATUS_TITLE_MARKER = "— Connected"
 _STATUS_TITLE_MARKERS = (_STATUS_TITLE_MARKER, "— Disconnected", "— Starting…")
 
 
-def _find_existing_status_message(channel_id: str) -> Optional[str]:
+def _find_existing_status_message(
+    channel_id: str, markers: tuple = _STATUS_TITLE_MARKERS
+) -> Optional[str]:
     """Looks for a status message this bot already pinned in the channel.
 
     Reusing it across restarts matters: creating a fresh one every startup would
     still march towards Discord's 50-pin ceiling over a weekend of restarts,
     just more slowly than the old post-per-transition behaviour did.
+
+    ``markers`` selects which kind of pinned message to match, so the ADS-B
+    board can reuse the same discovery logic without colliding with the
+    per-station stream status.
     """
     headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
     for path in ("pins/messages", "pins"):
@@ -1463,7 +1479,7 @@ def _find_existing_status_message(channel_id: str) -> Optional[str]:
                     continue
                 for embed in msg.get("embeds", []):
                     title = embed.get("title") or ""
-                    if any(marker in title for marker in _STATUS_TITLE_MARKERS):
+                    if any(marker in title for marker in markers):
                         return msg.get("id")
             return None
         except Exception:
@@ -1528,6 +1544,228 @@ def _broadcast_stream_status(station: dict, connected: bool, detail: str = "") -
 
 
 # ---------------------------------------------------------------------------
+# Live ADS-B tracking → Discord
+#
+# The poller in adsb_tracker knows nothing about Discord; it hands TrackEvents
+# to the callback wired up in main(). Everything that turns one of those into a
+# message lives here, alongside the transcript formatters it shares conventions
+# with (_TIER_COLOR, _now_ts, _now_iso, the outbox).
+#
+# adsb.fi's terms require attribution. It goes in the board description as a
+# real link (Discord does not render links in footers) and in every event
+# embed's footer, so it cannot be lost by editing one of them out.
+# ---------------------------------------------------------------------------
+
+_ADSB_ATTRIBUTION = "Data: [adsb.fi](https://adsb.fi) · [globe](https://globe.adsbexchange.com/)"
+
+_adsb_board_message: dict = {}  # channel_id -> message_id
+_ADSB_BOARD_MARKERS = ("Military & display", "Gold Coast air picture")
+
+_ADSB_EVENT_ICON = {
+    adsb_tracker.EV_APPEARED: "\U0001f4e1",       # satellite antenna
+    adsb_tracker.EV_DISAPPEARED: "\U0001f4f4",    # phone off
+    adsb_tracker.EV_BOX_ENTER: "\U0001f3af",      # target
+    adsb_tracker.EV_BOX_EXIT: "↗️",
+    adsb_tracker.EV_DEPARTURE: "\U0001f6eb",
+    adsb_tracker.EV_INBOUND: "\U0001f6ec",
+    adsb_tracker.EV_LANDED: "\U0001f6ec",
+    adsb_tracker.EV_EMERGENCY: "\U0001f6a8",
+    adsb_tracker.EV_POSITION: "\U0001f6e9️",
+}
+
+
+def _adsb_event_embed(ev) -> dict:
+    track = ev.track
+    icon = _ADSB_EVENT_ICON.get(ev.kind, "✈️")
+    lines = []
+    if track.classification.title:
+        lines.append(f"**{track.classification.title}**")
+    if ev.detail:
+        lines.append(ev.detail)
+    lines.append(f"[Track on globe.adsbexchange.com]({track.globe_url()})")
+
+    embed = {
+        "title": f"{icon} {ev.headline}"[:256],
+        "description": "\n".join(lines),
+        "color": _TIER_COLOR[ev.tier],
+        "footer": {"text": f"{_now_ts()} · {track.hex.upper()} · data adsb.fi"},
+        "timestamp": _now_iso(),
+    }
+    fields = []
+    if track.reg:
+        fields.append({"name": "Registration", "value": track.reg, "inline": True})
+    if track.typ:
+        fields.append({"name": "Type", "value": track.typ, "inline": True})
+    if track.squawk:
+        fields.append({"name": "Squawk", "value": track.squawk, "inline": True})
+    reasons = track.classification.reason_text()
+    if reasons:
+        # Why this was flagged. Shown on every alert on purpose: a bad
+        # classifier rule is then obvious from the message itself rather than
+        # something you have to go digging in the code to work out.
+        fields.append({"name": "Matched on", "value": reasons[:1024], "inline": False})
+    if fields:
+        embed["fields"] = fields[:6]
+    return embed
+
+
+def _adsb_channels_for(ev) -> list:
+    """Which channels this event belongs in."""
+    channels = []
+    if ev.military or ev.track.classification.interesting:
+        if config.DISCORD_CHANNEL_MILITARY:
+            channels.append(config.DISCORD_CHANNEL_MILITARY)
+    elif config.DISCORD_CHANNEL_FLIGHTS:
+        channels.append(config.DISCORD_CHANNEL_FLIGHTS)
+    # Aerodrome movements belong in the flights channel even for military
+    # aircraft — that is the channel someone watches to see what is using YBCG.
+    if ev.kind in (
+        adsb_tracker.EV_DEPARTURE,
+        adsb_tracker.EV_INBOUND,
+        adsb_tracker.EV_LANDED,
+    ) and config.DISCORD_CHANNEL_FLIGHTS:
+        if config.DISCORD_CHANNEL_FLIGHTS not in channels:
+            channels.append(config.DISCORD_CHANNEL_FLIGHTS)
+    return channels
+
+
+def _send_adsb_event(ev, state: SharedState) -> None:
+    """Route one TrackEvent to Discord (and Telegram for the loud ones)."""
+    if state.paused:
+        return
+    embed = _adsb_event_embed(ev)
+    emergency = ev.tier >= TIER_EMERGENCY
+
+    for channel_id in _adsb_channels_for(ev):
+        _enqueue_discord(channel_id, embed=dict(embed), priority=emergency)
+
+    if emergency and config.DISCORD_ALERTS_CHANNEL_ID:
+        _enqueue_discord(
+            config.DISCORD_ALERTS_CHANNEL_ID,
+            content=f"@here **{ev.headline}**",
+            embed=dict(embed),
+            priority=True,
+            allowed_mentions={"parse": ["everyone"]},
+        )
+
+    # Telegram mirrors only the things worth a phone buzz.
+    if config.TELEGRAM_ENABLED and (
+        emergency
+        or (ev.military and ev.kind in (
+            adsb_tracker.EV_APPEARED,
+            adsb_tracker.EV_DISAPPEARED,
+            adsb_tracker.EV_BOX_ENTER,
+        ))
+    ):
+        detail = f"\n{html.escape(ev.detail)}" if ev.detail else ""
+        _post_telegram(f"<b>{html.escape(ev.headline)}</b>{detail}")
+
+    if _display_ref is not None:
+        style = "bold red" if emergency else ("bold cyan" if ev.military else "dim cyan")
+        _display_ref.log(Text(f"✈ {ev.headline}", style=style))
+
+
+def _render_adsb_board(board: dict) -> str:
+    """The monospaced table body for the pinned board."""
+    rows = board.get("military") or []
+    if not rows:
+        return "```\nNothing military or unusual in range.\n```"
+    lines = [f"{'CALLSIGN':10} {'TYPE':5} {'ALT':>7} {'GS':>4} {'DIST':>5} {'BRG':>4}  NOTE"]
+    for r in rows[: config.ADSB_BOARD_MAX_ROWS]:
+        alt = "grnd" if r["on_ground"] else (
+            format(r["alt_ft"], ",") if r["alt_ft"] is not None else "?"
+        )
+        gs = f"{r['gs_kt']:.0f}" if r["gs_kt"] else "?"
+        dist = f"{r['dist_nm']:.0f}" if r["dist_nm"] is not None else "?"
+        brg = geo.compass_point(r["bearing"]) if r["bearing"] is not None else "?"
+        note = []
+        if r["in_box"]:
+            note.append("IN BOX")
+        note.append(r["title"] or ("military" if r["military"] else "probable display"))
+        name = (r["ident"] or r["reg"] or r["hex"].upper())[:10]
+        lines.append(
+            f"{name:10} {(r['type'] or '?')[:5]:5} {alt:>7} {gs:>4} "
+            f"{dist:>5} {brg:>4}  {' · '.join(note)[:44]}"
+        )
+    extra = len(rows) - config.ADSB_BOARD_MAX_ROWS
+    if extra > 0:
+        lines.append(f"… and {extra} more")
+    return "```\n" + "\n".join(lines) + "\n```"
+
+
+def _adsb_board_embed(board: dict) -> dict:
+    rows = board.get("military") or []
+    box = board.get("box") or []
+    summary = (
+        f"{len(rows)} tracked · {len(box)} in the display box · "
+        f"{board.get('tracks', 0)} aircraft in range · source {board.get('source', '?')}"
+    )
+    return {
+        "title": "\U0001f396️ Military & display — Gold Coast",
+        "description": f"{_render_adsb_board(board)}\n{summary}\n{_ADSB_ATTRIBUTION}",
+        "color": 0xE67E22 if rows else 0x2ECC71,
+        "footer": {"text": _now_ts()},
+        "timestamp": _now_iso(),
+    }
+
+
+_adsb_board_last: dict = {}
+
+
+def _broadcast_adsb_board(board: dict) -> None:
+    """Edit the pinned board in place, but only when something actually changed.
+
+    Two guards keep this cheap. First, an unchanged render is not re-sent at
+    all, so a quiet night costs zero Discord traffic. Second, board refreshes
+    go in at normal priority and are skipped outright when the outbox is
+    backing up — there will be another refresh in 30 seconds, whereas a dropped
+    event is gone for good.
+    """
+    if not config.DISCORD_ENABLED:
+        return
+    channel_id = config.DISCORD_CHANNEL_MILITARY or config.DISCORD_CHANNEL_FLIGHTS
+    if not channel_id:
+        return
+    if _discord_outbox is not None and _discord_outbox.depth() > 50:
+        return
+
+    body = _render_adsb_board(board)
+    if _adsb_board_last.get(channel_id) == body:
+        return
+    _adsb_board_last[channel_id] = body
+
+    embed = _adsb_board_embed(board)
+    message_id = _adsb_board_message.get(channel_id)
+    if message_id:
+        _enqueue_discord(channel_id, embed=embed, message_id=message_id)
+    else:
+        _enqueue_discord(channel_id, embed=embed)
+
+
+def _init_adsb_board_messages(state: SharedState) -> None:
+    """Create or adopt the pinned ADS-B board. Main thread, startup only."""
+    if not (config.DISCORD_ENABLED and config.ADSB_ENABLED):
+        return
+    channel_id = config.DISCORD_CHANNEL_MILITARY or config.DISCORD_CHANNEL_FLIGHTS
+    if not channel_id:
+        return
+    embed = {
+        "title": "\U0001f396️ Military & display — Gold Coast",
+        "description": f"Starting up…\n{_ADSB_ATTRIBUTION}",
+        "color": 0x95A5A6,
+        "footer": {"text": _now_ts()},
+    }
+    existing = _find_existing_status_message(channel_id, _ADSB_BOARD_MARKERS)
+    if existing and _edit_discord(channel_id, existing, embed=embed):
+        _adsb_board_message[channel_id] = existing
+        return
+    message_id = _post_discord(channel_id, embed=embed)
+    if message_id:
+        _adsb_board_message[channel_id] = message_id
+        _pin_discord(channel_id, message_id)
+
+
+# ---------------------------------------------------------------------------
 # Telegram command listener (bidirectional control)
 # ---------------------------------------------------------------------------
 
@@ -1542,6 +1780,186 @@ def _resolve_station(arg: str) -> Optional[dict]:
         if s["icao"] == arg:
             return s
     return None
+
+
+def _adsb_rows_text(rows: list, empty: str) -> str:
+    """Rows as a <pre> table. Shared by /air, /mil and /box.
+
+    Responses are written in the same HTML subset the Telegram handler uses;
+    _html_to_discord_md converts for Discord, so one implementation serves
+    both transports.
+    """
+    if not rows:
+        return empty
+    lines = [f"{'CALLSIGN':9} {'TYPE':5} {'ALT':>6} {'GS':>4} {'DIST':>5} BRG"]
+    for r in rows:
+        alt = "grnd" if r["on_ground"] else (
+            format(r["alt_ft"], ",") if r["alt_ft"] is not None else "?"
+        )
+        gs = f"{r['gs_kt']:.0f}" if r["gs_kt"] else "?"
+        dist = f"{r['dist_nm']:.0f}" if r["dist_nm"] is not None else "?"
+        brg = geo.compass_point(r["bearing"]) if r["bearing"] is not None else "?"
+        name = (r["ident"] or r["reg"] or r["hex"].upper())[:9]
+        lines.append(
+            f"{name:9} {(r['type'] or '?')[:5]:5} {alt:>6} {gs:>4} {dist:>5} {brg}"
+        )
+    return "<pre>" + html.escape("\n".join(lines)) + "</pre>"
+
+
+def _handle_adsb_command(
+    cmd: str,
+    arg: str,
+    respond: Callable[[str], None],
+    tui: Callable[..., None],
+    source: str,
+) -> None:
+    """/air /mil /box /track /adsb /watch /unwatch — transport-agnostic."""
+    poller = _adsb_poller
+    if poller is None:
+        respond(
+            "\U0001f6e9 ADS-B tracking is not running.\n"
+            "Set <code>DISCORD_CHANNEL_MILITARY</code> and/or "
+            "<code>DISCORD_CHANNEL_FLIGHTS</code> in <code>.env</code>, "
+            "or check you did not start with <code>--no-adsb</code>."
+        )
+        return
+
+    arg_l = arg.strip().lower()
+
+    if cmd == "adsb":
+        if arg_l in ("on", "off"):
+            poller.set_enabled(arg_l == "on")
+            respond(f"\U0001f4e1 ADS-B tracking: <b>{arg_l.upper()}</b>")
+            tui(f"{source} → ADS-B tracking {arg_l.upper()}")
+            return
+        h = poller.health()
+        age = time.time() - h["last_poll_at"] if h["last_poll_at"] else None
+        lines = [
+            "\U0001f4e1 <b>ADS-B tracking</b>",
+            f"State: <b>{'ON' if h['enabled'] else 'OFF'}</b> · source <code>{h['source']}</code>",
+            f"Last poll: {f'{age:.0f}s ago' if age is not None else 'never'} ({h['polls']} polls)",
+            f"Tracking: {h['tracks']} aircraft · {h['military']} military · {h['in_box']} in the box",
+            f"Events sent: {h['events']} · rate-limited away: {h['suppressed']}",
+            f"Requests: {h['requests']} · failures: {h['failures']} · 429s: {h['rate_limited']}",
+        ]
+        if h["last_error"]:
+            lines.append(f"Last error: <code>{html.escape(h['last_error'])}</code>")
+        if h["watch"]:
+            lines.append(f"Watchlist: <code>{html.escape(', '.join(h['watch']))}</code>")
+        if poller.store is not None:
+            s = poller.store.stats()
+            if "error" not in s:
+                lines.append(
+                    f"Seen all-time: {s['sightings']} aircraft ({s['military_seen']} military)"
+                )
+        lines.append("Data from adsb.fi — https://adsb.fi")
+        respond("\n".join(lines))
+        return
+
+    if cmd in ("watch", "unwatch"):
+        if not arg:
+            respond(f"Usage: <code>/{cmd} &lt;hex|callsign&gt;</code>")
+            return
+        if cmd == "watch":
+            ok = poller.add_watch(arg)
+            respond(
+                f"\U0001f440 Watching <code>{html.escape(arg.upper())}</code>"
+                if ok else f"Already watching <code>{html.escape(arg.upper())}</code>"
+            )
+        else:
+            ok = poller.remove_watch(arg)
+            respond(
+                f"Stopped watching <code>{html.escape(arg.upper())}</code>"
+                if ok else f"<code>{html.escape(arg.upper())}</code> was not on the watchlist"
+            )
+        tui(f"{source} → {cmd} {arg.upper()}")
+        return
+
+    if cmd == "track":
+        if not arg:
+            respond("Usage: <code>/track &lt;hex|callsign|registration&gt;</code>")
+            return
+        found = poller.find(arg)
+        if not found:
+            # Not in range — ask the feed directly. This goes through the same
+            # rate limiter as the poller, so it cannot burst the API.
+            reports = (
+                poller.source.by_hex(arg) if len(arg) == 6 and _is_hexish(arg)
+                else poller.source.by_callsign(arg) or poller.source.by_registration(arg)
+            )
+            if not reports:
+                respond(
+                    f"\U0001f50d No aircraft matching <code>{html.escape(arg.upper())}</code> "
+                    "is transmitting right now."
+                )
+                return
+            r = reports[0]
+            cls = adsb_classify.classify(r, in_box=False)
+            respond(
+                f"\U0001f50d <b>{html.escape(r.label())}</b> — outside the tracked area\n"
+                f"{html.escape(r.reg or '')} {html.escape(r.descr or r.typ or '')}\n"
+                f"{r.lat:.3f}, {r.lon:.3f} · {r.alt_ft or '?'} ft\n"
+                f"{html.escape(cls.reason_text()) if cls.signals else ''}\n"
+                f"https://globe.adsbexchange.com/?icao={r.hex}"
+            )
+            return
+        t = found[0]
+        cls = t.classification
+        lines = [
+            f"\U0001f50d <b>{html.escape(t.label())}</b>",
+            html.escape(cls.title or t.descr or t.typ or "unidentified"),
+            html.escape(t.position_text()),
+            f"State: {t.state} · phase: {t.phase}"
+            + (" · <b>IN THE DISPLAY BOX</b>" if t.in_box else ""),
+        ]
+        if t.squawk:
+            lines.append(f"Squawk: <code>{t.squawk}</code>")
+        if cls.signals:
+            lines.append(
+                f"Classified {cls.confidence:.0%}: {html.escape(cls.reason_text())}"
+            )
+        if poller.store is not None:
+            recent = poller.store.recent_events(5, t.hex)
+            if recent:
+                lines.append("Recent:")
+                for e in recent:
+                    when = datetime.fromtimestamp(e["at"], _AEST).strftime("%H:%M")
+                    lines.append(f"  {when} {e['kind']}")
+        lines.append(t.globe_url())
+        respond("\n".join(lines))
+        return
+
+    if cmd == "mil":
+        rows = poller.snapshot(military_only=True, airborne_only=False)
+        respond(
+            "\U0001f396 <b>Military &amp; display aircraft</b>\n"
+            + _adsb_rows_text(rows, "Nothing military or unusual in range.")
+        )
+        return
+
+    if cmd == "box":
+        rows = poller.snapshot(box_only=True, airborne_only=False)
+        respond(
+            "\U0001f3af <b>Airshow display box</b>\n"
+            + _adsb_rows_text(rows, "The display box is empty.")
+        )
+        return
+
+    # /air
+    rows = poller.snapshot(airborne_only=True, limit=25)
+    respond(
+        f"✈️ <b>Airborne within {config.ADSB_RADIUS_NM:.0f} nm of "
+        f"{config.ADSB_HOME_ICAO}</b>\n"
+        + _adsb_rows_text(rows, "Nothing airborne in range.")
+    )
+
+
+def _is_hexish(text: str) -> bool:
+    try:
+        int(text, 16)
+        return True
+    except ValueError:
+        return False
 
 
 def _handle_command(
@@ -1583,6 +2001,15 @@ def _handle_command(
             "/military on|off — toggle military callsign detection\n"
             "/military refresh — re-scrape the callsign list now\n"
             "/military FALCON — look a callsign up\n"
+            "\n<b>Live ADS-B tracking</b>\n"
+            "/air — what is airborne in range now\n"
+            "/mil — military &amp; airshow display aircraft only\n"
+            "/box — who is in the airshow display box\n"
+            "/track VH-SIC — detail on one aircraft (hex, callsign or rego)\n"
+            "/watch 7CF839 — always alert on this aircraft\n"
+            "/unwatch 7CF839 — stop watching it\n"
+            "/adsb — ADS-B poller health\n"
+            "/adsb on|off — toggle ADS-B tracking\n"
             "/pause — suspend all transcription & forwarding\n"
             "/resume — restart transcription & forwarding\n"
             "/help — this message"
@@ -1619,6 +2046,16 @@ def _handle_command(
             f"({'on' if state.military_enabled else 'off'}, "
             f"scraped {mil['last_success_at']})"
         )
+        if _adsb_poller is not None:
+            a = _adsb_poller.health()
+            age = time.time() - a["last_poll_at"] if a["last_poll_at"] else None
+            lines.append(
+                f"ADS-B: <b>{a['tracks']}</b> tracked "
+                f"({a['military']} military, {a['in_box']} in box) · "
+                f"polled {f'{age:.0f}s ago' if age is not None else 'never'} · "
+                f"{a['source']}"
+                + (f" · {a['suppressed']} alerts rate-limited" if a["suppressed"] else "")
+            )
         respond("\n".join(lines))
 
     elif cmd == "status":
@@ -1778,7 +2215,10 @@ def _handle_command(
         else:
             respond("Usage: /keywords on  or  /keywords off")
 
-    elif cmd in ("military", "mil", "callsign", "callsigns"):
+    # "mil" deliberately NOT in this tuple — it now means "what military is
+    # airborne right now", which during an event gets asked constantly, whereas
+    # "look up a callsign in the register" does not. /military is unchanged.
+    elif cmd in ("military", "callsign", "callsigns"):
         if arg_l in ("on", "off"):
             want = arg_l == "on"
             state.set_military(want)
@@ -1813,6 +2253,9 @@ def _handle_command(
             lines.append(f"Source: {html.escape(stats['source'])}")
             lines.append("\n/military on|off · /military refresh · /military FALCON")
             respond("\n".join(lines))
+
+    elif cmd in ("air", "mil", "box", "track", "adsb", "watch", "unwatch"):
+        _handle_adsb_command(cmd, arg, respond, tui, source)
 
     elif cmd in ("pause", "resume"):
         want_paused = cmd == "pause"
@@ -2268,6 +2711,8 @@ def main() -> None:
                         help="Calibrate VAD for a station, e.g. --calibrate YBCG")
     parser.add_argument("--no-military", action="store_true",
                         help="Disable military callsign detection")
+    parser.add_argument("--no-adsb", action="store_true",
+                        help="Disable live ADS-B aircraft tracking")
     parser.add_argument("--refresh-callsigns", action="store_true",
                         help="Re-scrape the military callsign list and exit")
     args = parser.parse_args()
@@ -2349,9 +2794,11 @@ def main() -> None:
     # _display_ref is set, so a permissions failure is reported rather than
     # silently swallowed.
     _init_stream_status_messages(state)
+    if not args.no_adsb:
+        _init_adsb_board_messages(state)
 
     with display:
-        global _discord_outbox, _transcriber_ref
+        global _discord_outbox, _transcriber_ref, _adsb_poller
         if config.DISCORD_ENABLED:
             _discord_outbox = DiscordOutbox()
 
@@ -2402,6 +2849,35 @@ def main() -> None:
             )
             dc_cmd_thread.start()
 
+        # Must start AFTER _discord_outbox exists: without it, _enqueue_discord
+        # falls through to a blocking HTTP post on the calling thread, and the
+        # calling thread here is the poll loop.
+        if config.ADSB_ENABLED and not args.no_adsb:
+            _adsb_poller = adsb_tracker.AdsbPoller(
+                stop_event=state.stop_event,
+                on_event=lambda ev: _send_adsb_event(ev, state),
+                on_board=_broadcast_adsb_board,
+                on_log=lambda msg, warn=False: display.log(
+                    Text(msg, style="dim yellow" if warn else "dim cyan")
+                ),
+            )
+            threading.Thread(
+                target=_adsb_poller.run, daemon=True, name="adsb-poll"
+            ).start()
+
+            if config.ADSB_WEB_ENABLED:
+                threading.Thread(
+                    target=adsb_web.serve,
+                    args=(_adsb_poller, state.stop_event),
+                    kwargs={
+                        "on_log": lambda msg, warn=False: display.log(
+                            Text(msg, style="dim yellow" if warn else "dim cyan")
+                        )
+                    },
+                    daemon=True,
+                    name="adsb-web",
+                ).start()
+
         _send_startup_notification(state)
         if config.DISCORD_ENABLED:
             _send_discord_startup(state, backend_name=_backend_name)
@@ -2417,6 +2893,9 @@ def main() -> None:
         except KeyboardInterrupt:
             state.stop_event.set()
         finally:
+            if _adsb_poller is not None:
+                _adsb_poller.shutdown()
+                _adsb_poller = None
             transcriber.shutdown()
             if _discord_outbox is not None:
                 _discord_outbox.shutdown()

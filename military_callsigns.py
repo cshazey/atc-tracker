@@ -447,6 +447,8 @@ class Registry:
         self._by_squash: dict[str, CallsignRecord] = {}
         self._by_length: dict[int, list[tuple[str, CallsignRecord]]] = {}
         self._by_phonetic: dict[str, list[tuple[str, CallsignRecord]]] = {}
+        # ATC ID prefix -> record, for clean ADS-B idents. See lookup_prefix().
+        self._by_prefix: dict[str, CallsignRecord] = {}
         self._token_cache: dict[str, Optional[tuple[CallsignRecord, float, str]]] = {}
         self._loaded = False
         self._max_words = 1
@@ -573,12 +575,28 @@ class Registry:
         self._by_squash = {}
         self._by_length = {}
         self._by_phonetic = {}
+        self._by_prefix = {}
         self._token_cache = {}
         self._max_words = 1
         blocked = {squash(w) for w in config.MILITARY_CALLSIGN_BLOCKLIST} | {
             squash(w) for w in PHONETIC_ALPHABET
         }
         for rec in records:
+            # Prefixes are indexed for EVERY record, deliberately before the
+            # blocklist gate below. That blocklist is a transcript-matching
+            # policy — it exists because Whisper turns ordinary speech into
+            # HAWK and DUKE. An ADS-B ident is transmitted as text, so none of
+            # that applies and excluding e.g. HAWK here would lose real RAAF
+            # Hawk 127s. The separate MILITARY_PREFIX_BLOCKLIST covers the
+            # genuine hazard: prefixes the source page misparses.
+            for pfx in rec.prefixes:
+                pkey = squash(pfx)
+                if (
+                    len(pkey) < config.MILITARY_MIN_PREFIX_LEN
+                    or pkey in config.MILITARY_PREFIX_BLOCKLIST
+                ):
+                    continue
+                self._by_prefix.setdefault(pkey, rec)
             key = squash(rec.callsign)
             if not key or key in blocked or len(key) < config.MILITARY_MIN_CALLSIGN_LEN:
                 continue
@@ -662,6 +680,26 @@ class Registry:
             if squash(rec.callsign) == key:
                 return rec
         return None
+
+    def lookup_prefix(self, prefix: str) -> Optional[CallsignRecord]:
+        """Exact ATC-ID-prefix lookup for a clean ADS-B ident: 'BLKT' -> BLACKCAT.
+
+        Deliberately NOT fuzzy, and deliberately separate from lookup(), which
+        resolves callsign *names*. match() has to tolerate mangling because
+        Whisper has never heard these words; an ADS-B ident arrives as exact
+        text, so the same tolerance here would be pure false-positive surface.
+
+        Callers should treat a hit as the military signal in its own right and
+        only surface record.aircraft / record.squadron when they look sane —
+        a handful of source rows are misparsed, so the *name* attached to a
+        prefix is less trustworthy than the fact that it matched.
+        """
+        self.load()
+        return self._by_prefix.get(squash(prefix))
+
+    def prefix_count(self) -> int:
+        self.load()
+        return len(self._by_prefix)
 
     def stats(self) -> dict:
         self.load()
@@ -892,6 +930,19 @@ def detect(text: str) -> list[Match]:
         return get_registry().match(text)
     except Exception:
         return []
+
+
+def lookup_ident_prefix(prefix: str) -> Optional[CallsignRecord]:
+    """Registry record for an ADS-B callsign prefix, or None. Never raises.
+
+    Used by adsb_classify to turn 'TROJ23' into 'TROJAN, C-130J-30, 37SQN'.
+    """
+    if not prefix:
+        return None
+    try:
+        return get_registry().lookup_prefix(prefix)
+    except Exception:
+        return None
 
 
 def start_auto_refresh(

@@ -8,6 +8,52 @@ try:
 except ImportError:
     pass
 
+
+def _str(name: str, default: str) -> str:
+    """Env var as a string, falling back to the default when blank.
+
+    A blank value must mean "not set", not "set to empty". .env.example ships
+    optional keys as bare `KEY=` so they are discoverable, and os.environ.get's
+    default only applies when the key is *absent* — so copying the example
+    verbatim would otherwise hand every one of these an empty string. That is
+    not hypothetical: an empty STREAM_URL_YBCG produced a station with no URL
+    at all, and empty numeric keys crashed the import outright on int("").
+    """
+    value = os.environ.get(name, "").strip()
+    return value if value else default
+
+
+def _flag(name: str, default: str = "1") -> bool:
+    """Env var as a boolean, using the project's usual truthiness rules.
+
+    Note a blank value is False here, not the default — unlike _str. That is
+    the existing convention across the project and .env.example always gives
+    these an explicit 0 or 1.
+    """
+    return os.environ.get(name, default).strip() not in ("0", "false", "False", "")
+
+
+def _num(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "").strip() or default)
+    except ValueError:
+        return float(default)
+
+
+def _int(name: str, default: int) -> int:
+    return int(_num(name, default))
+
+
+def _csv(name: str, default: str = "") -> tuple[str, ...]:
+    raw = os.environ.get(name, default)
+    return tuple(p.strip().upper() for p in raw.split(",") if p.strip())
+
+
+# Local timezone. Lives here rather than in atc_tracker so the adsb_* modules
+# can render AEST timestamps without importing the main app (which would be a
+# circular import, and would drag in mlx/miniaudio for no reason).
+TIMEZONE = _str("TIMEZONE", "Australia/Brisbane")
+
 _HEADERS = {
     "accept": "*/*",
     "accept-language": "en-GB,en;q=0.9",
@@ -61,6 +107,14 @@ _PROMPT_YBCG = (
     "one one eight decimal seven, wilco."
 )
 
+# Gold Coast Ground 121.800 + Tower 118.700 on one mount, so the prompt has to
+# cover both: taxi/clearance phraseology and takeoff/landing phraseology.
+_PROMPT_YBCG_TWR = (
+    "Gold Coast Tower, Yankee Bravo Whiskey, runway one four, cleared for takeoff, "
+    "wind zero nine zero at twelve, QNH one zero one seven, taxi via alpha, "
+    "hold short runway three two, contact Ground one two one decimal eight."
+)
+
 _PROMPT_YSPT = (
     "Southport traffic, Golf Kilo Delta, Cessna one seven two, five miles north, "
     "inbound Southport, joining crosswind runway one four, turning base, "
@@ -87,6 +141,18 @@ STREAMS = [
         "vad_threshold": 0.003,
     },
     {
+        # Gold Coast Ground/Tower. Distinct from the YBCG entry above, which is
+        # Brisbane Centre sector audio hosted under a ybcg mount — this is the
+        # aerodrome's own frequencies (121.800 / 118.700) and the pair the
+        # Pacific Airshow display aircraft actually work.
+        "icao": "YBCG_TWR",
+        "name": "Gold Coast Tower",
+        "mount": "ybcg3_gnd_twr",
+        "headers": _HEADERS,
+        "prompt": _PROMPT_YBCG_TWR,
+        "vad_threshold": 0.003,
+    },
+    {
         "icao": "YSPT",
         "name": "Southport",
         "mount": "yspt2",
@@ -105,7 +171,9 @@ STREAMS = [
 ]
 
 for _s in STREAMS:
-    _s["url"] = os.environ.get(
+    # _str, not os.environ.get: a bare `STREAM_URL_YBCG=` in .env would
+    # otherwise give this station an empty URL and silently kill the feed.
+    _s["url"] = _str(
         f"STREAM_URL_{_s['icao']}",
         f"{LIVEATC_REDIRECTOR}/{_s['mount']}",
     )
@@ -126,7 +194,7 @@ for _s in STREAMS:
 # "parakeet" — NVIDIA Parakeet TDT via parakeet-mlx (pip install parakeet-mlx)
 # Override with STT_BACKEND in .env or --stt on the command line.
 # ---------------------------------------------------------------------------
-STT_BACKEND = os.environ.get("STT_BACKEND", "whisper").strip().lower()
+STT_BACKEND = _str("STT_BACKEND", "whisper").lower()
 
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 PARAKEET_MODEL = "mlx-community/parakeet-tdt-0.6b-v3"
@@ -181,7 +249,7 @@ STREAM_STALL_TIMEOUT_SEC = 20    # no audio for this long → force reconnect
 # so recordings stay a faithful source for re-transcription and benchmarking.
 # ---------------------------------------------------------------------------
 RECORDING_ENABLED = os.environ.get("RECORDING_ENABLED", "1").strip() not in ("0", "false", "False", "")
-RECORDING_RETENTION_DAYS = int(os.environ.get("RECORDING_RETENTION_DAYS", "14"))
+RECORDING_RETENTION_DAYS = _int("RECORDING_RETENTION_DAYS", 14)
 
 # Substitutions applied to every transcript. Add entries here as you spot a
 # consistent misrecognition — the ones below were all observed in real YBCG /
@@ -280,12 +348,12 @@ KEYWORDS = KEYWORDS_EMERGENCY + KEYWORDS_INTEREST
 # Tune for precision, not recall: this feed says "runway one four" and "Golf
 # Kilo Delta" all day, and a false alert costs more than a missed one.
 # ---------------------------------------------------------------------------
-MILITARY_CALLSIGN_URL = os.environ.get(
+MILITARY_CALLSIGN_URL = _str(
     "MILITARY_CALLSIGN_URL",
     "https://www.swld.com.au/pages/aus_raaf_callsigns.htm",
 )
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-MILITARY_CALLSIGN_DB = os.environ.get(
+MILITARY_CALLSIGN_DB = _str(
     "MILITARY_CALLSIGN_DB", os.path.join(_DATA_DIR, "military_callsigns.db")
 )
 # Snapshot committed to the repo, loaded when the database is empty so detection
@@ -299,7 +367,7 @@ MILITARY_DETECTION_ENABLED = os.environ.get(
 ).strip() not in ("0", "false", "False", "")
 
 # Hours between scrapes, and how often the background thread wakes to check.
-MILITARY_REFRESH_HOURS = float(os.environ.get("MILITARY_REFRESH_HOURS", "24"))
+MILITARY_REFRESH_HOURS = _num("MILITARY_REFRESH_HOURS", 24)
 MILITARY_REFRESH_CHECK_SEC = 3600
 MILITARY_REFRESH_STARTUP_DELAY_SEC = 45
 
@@ -310,8 +378,31 @@ MILITARY_MIN_SCRAPE_ROWS = 300
 # Shorter than this and a callsign is too easy to hit by accident.
 MILITARY_MIN_CALLSIGN_LEN = 4
 
+# --- ATC ID prefixes (ADS-B idents, not transcripts) ------------------------
+#
+# The source table has an "ATC ID PREFIX" column holding exactly the form an
+# aircraft broadcasts as its ADS-B callsign: TROJAN transmits TROJ23, BLACKCAT
+# transmits BLKT10. Registry.lookup_prefix() indexes that column so the ADS-B
+# side can name what it sees.
+#
+# Note this is a SEPARATE policy from MILITARY_CALLSIGN_BLOCKLIST above. That
+# one guards against Whisper mishearing ordinary speech; an ADS-B ident arrives
+# as exact text so none of it applies. What DOES go wrong here is the scrape:
+# multi-word rows like "AWES OAKEY" leak their ordinary words into the prefix
+# column. Those are what this blocklist removes.
+#
+# ARMY and NAVY are deliberately kept. Both map to misparsed rows, so the
+# *label* they resolve to is wrong — but an aircraft transmitting "ARMY12" as
+# its ident really is military, which is the signal we care about. The
+# classifier only prints a record's aircraft/squadron when they look sane.
+MILITARY_MIN_PREFIX_LEN = 3
+MILITARY_PREFIX_BLOCKLIST = {
+    "AND", "CENTRE", "EAST", "FLIGHT", "FLYING", "OAKEY", "SALE", "SCHOOL",
+    "SEE", "SQN", "TARGET", "TEST", "TOWING", "UNIT",
+}
+
 MILITARY_FUZZY = True
-MILITARY_MIN_CONFIDENCE = float(os.environ.get("MILITARY_MIN_CONFIDENCE", "0.70"))
+MILITARY_MIN_CONFIDENCE = _num("MILITARY_MIN_CONFIDENCE", 0.70)
 MILITARY_PHONETIC_CONFIDENCE = 0.72
 # Soundex collapses vowels, so short words collide constantly ("there's" and
 # TEREK share a skeleton). Only long callsigns may match on phonetics alone.
@@ -399,6 +490,188 @@ DISCORD_ENABLED = bool(
     and DISCORD_ALERTS_CHANNEL_ID
     and DISCORD_COMMANDS_CHANNEL_ID
     and any(_s["discord_channel_id"] for _s in STREAMS)
+)
+
+# ---------------------------------------------------------------------------
+# Live ADS-B tracking (adsb_source / adsb_classify / adsb_tracker)
+#
+# Polls a free community ADS-B feed for aircraft around the Gold Coast, works
+# out which of them are military or airshow display aircraft, and posts events
+# to Discord. Complements the audio side: the radio tells you what was said,
+# this tells you what is actually in the air — including the aircraft that are
+# NOT talking.
+#
+# Data comes from adsb.fi (https://adsb.fi), which is free, needs no API key,
+# and is licensed for personal non-commercial use only. Two conditions come
+# with that and are honoured in code: a hard 1 request/second rate limit
+# (see adsb_source.AdsbSource._get) and mandatory attribution (see the board
+# footer and event embeds in atc_tracker.py). adsb.lol is the failover.
+# ---------------------------------------------------------------------------
+_ADSB_ON = _flag("ADSB_ENABLED", "1")
+
+ADSB_PRIMARY_URL = _str("ADSB_PRIMARY_URL", "https://opendata.adsb.fi/api/v2")
+ADSB_FALLBACK_URL = _str("ADSB_FALLBACK_URL", "https://api.adsb.lol/v2")
+ADSB_ATTRIBUTION_URL = "https://adsb.fi"
+# Identify ourselves properly. These are volunteer-run endpoints; the LiveATC
+# browser-spoof headers above would be both rude and useless here.
+ADSB_USER_AGENT = _str(
+    "ADSB_USER_AGENT",
+    "atc-tracker/1.0 (+https://github.com/cshazey/atc-tracker; personal non-commercial)",
+)
+# 1.1s against a published 1 req/s ceiling — 10% margin for clock jitter.
+ADSB_MIN_REQUEST_INTERVAL_SEC = _num("ADSB_MIN_REQUEST_INTERVAL_SEC", 1.1)
+ADSB_TIMEOUT_SEC = _num("ADSB_TIMEOUT_SEC", 12)
+ADSB_FAILOVER_ERRORS = _int("ADSB_FAILOVER_ERRORS", 3)
+ADSB_FAILBACK_SEC = _num("ADSB_FAILBACK_SEC", 300)
+
+# Poll cadence. One area request per ADSB_POLL_SEC is 0.1 req/s — well inside
+# the budget, and a 250kt display aircraft still only moves 0.7 NM per poll.
+ADSB_POLL_SEC = _num("ADSB_POLL_SEC", 10)
+# The global /v2/mil sweep exists to catch an ADF transit still outside the
+# radius, so it does not need fine granularity.
+ADSB_MIL_POLL_SEC = _num("ADSB_MIL_POLL_SEC", 60)
+ADSB_MIL_SWEEP_ENABLED = _flag("ADSB_MIL_SWEEP_ENABLED", "1")
+
+# Gold Coast Airport YBCG/OOL — the reference point for arrival/departure work.
+ADSB_HOME_LAT = _num("ADSB_HOME_LAT", -28.1644)
+ADSB_HOME_LON = _num("ADSB_HOME_LON", 153.5047)
+ADSB_HOME_ELEV_FT = _num("ADSB_HOME_ELEV_FT", 21)
+ADSB_HOME_ICAO = _str("ADSB_HOME_ICAO", "YBCG")
+# 60 NM from YBCG reaches RAAF Amberley (52 NM), where the heavy military
+# transits into a Gold Coast airshow originate.
+ADSB_RADIUS_NM = _num("ADSB_RADIUS_NM", 60)
+
+# Airshow display box — the offshore strip between Narrowneck and Broadbeach.
+# Either a bbox "lat_min,lat_max,lon_min,lon_max" or a polygon
+# "lat,lon;lat,lon;..."; the polygon wins when both are set.
+ADSB_BOX_BBOX = _str("ADSB_BOX_BBOX", "-28.06,-27.94,153.42,153.52")
+ADSB_BOX_POLYGON = os.environ.get("ADSB_BOX_POLYGON", "")
+ADSB_BOX_MAX_ALT_FT = _num("ADSB_BOX_MAX_ALT_FT", 6000)
+# Hysteresis: "inside" uses the box, "outside" uses it grown by this much, and
+# between the two the previous state holds. Without it an aircraft orbiting the
+# boundary emits an enter/exit pair every poll.
+ADSB_BOX_HYST_NM = _num("ADSB_BOX_HYST_NM", 0.5)
+ADSB_BOX_DWELL_SEC = _num("ADSB_BOX_DWELL_SEC", 20)
+
+
+def _parse_bbox(raw: str):
+    try:
+        parts = [float(p) for p in raw.split(",")]
+    except ValueError:
+        return None
+    if len(parts) != 4:
+        return None
+    lat_a, lat_b, lon_a, lon_b = parts
+    return (min(lat_a, lat_b), max(lat_a, lat_b), min(lon_a, lon_b), max(lon_a, lon_b))
+
+
+def _parse_polygon(raw: str):
+    pts = []
+    for chunk in raw.split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            lat, lon = (float(x) for x in chunk.split(","))
+        except ValueError:
+            return None
+        pts.append((lat, lon))
+    return pts if len(pts) >= 3 else None
+
+
+ADSB_BOX = _parse_bbox(ADSB_BOX_BBOX) or (-28.06, -27.94, 153.42, 153.52)
+ADSB_BOX_POLY = _parse_polygon(ADSB_BOX_POLYGON)
+
+# Presence state machine. See the module docstring in adsb_tracker.py for why
+# each of these is where it is — in short, low aircraft over water sit at the
+# edge of receiver coverage and every one of these numbers exists to stop that
+# turning into an alert storm.
+ADSB_SEED_POLLS = _int("ADSB_SEED_POLLS", 2)
+ADSB_APPEAR_CONFIRM_POLLS = _int("ADSB_APPEAR_CONFIRM_POLLS", 2)
+ADSB_APPEAR_GAP_MIN = _num("ADSB_APPEAR_GAP_MIN", 30)
+ADSB_FADE_SEC = _num("ADSB_FADE_SEC", 45)
+ADSB_LOST_SEC = _num("ADSB_LOST_SEC", 120)
+ADSB_LOST_SEC_BOX = _num("ADSB_LOST_SEC_BOX", 60)
+ADSB_MIN_SEEN_FOR_LOSS = _int("ADSB_MIN_SEEN_FOR_LOSS", 6)
+ADSB_PRUNE_SEC = _num("ADSB_PRUNE_SEC", 900)
+# Above this altitude a vanished target is reported as "transponder off";
+# below it as the softer "signal lost", because low-level coverage over water
+# is genuinely unreliable and we should not claim more than we know.
+ADSB_TXPDR_OFF_MIN_ALT_FT = _num("ADSB_TXPDR_OFF_MIN_ALT_FT", 5000)
+
+# YBCG-relative flight phases.
+ADSB_DEP_ALT_FT = _num("ADSB_DEP_ALT_FT", 700)
+ADSB_DEP_RANGE_NM = _num("ADSB_DEP_RANGE_NM", 6)
+ADSB_ARR_RANGE_NM = _num("ADSB_ARR_RANGE_NM", 25)
+ADSB_ARR_ALT_FT = _num("ADSB_ARR_ALT_FT", 8000)
+ADSB_ARR_CLOSING_KT = _num("ADSB_ARR_CLOSING_KT", 60)
+ADSB_PHASE_CONFIRM_POLLS = _int("ADSB_PHASE_CONFIRM_POLLS", 2)
+
+# Classification thresholds. Confidence is a noisy-OR combination of the
+# per-signal weights in adsb_classify.
+ADSB_MIL_CONFIDENCE = _num("ADSB_MIL_CONFIDENCE", 0.60)
+ADSB_PROBABLE_CONFIDENCE = _num("ADSB_PROBABLE_CONFIDENCE", 0.35)
+ADSB_ALERT_MIN_CONFIDENCE = _num("ADSB_ALERT_MIN_CONFIDENCE", 0.60)
+
+# Alert volume control.
+ADSB_EVENT_COOLDOWN_SEC = _num("ADSB_EVENT_COOLDOWN_SEC", 600)
+# Token bucket. An airshow launch is ~20 aircraft in 3 minutes; the Discord
+# outbox drains at ~4 msg/s shared with transcripts, so without a cap the
+# ADS-B side would delay the audio side — exactly what the outbox exists to
+# prevent. Emergencies bypass this.
+ADSB_MAX_ALERTS_PER_MIN = _int("ADSB_MAX_ALERTS_PER_MIN", 12)
+ADSB_POS_UPDATE_SEC = _num("ADSB_POS_UPDATE_SEC", 300)
+ADSB_POS_UPDATE_SEC_BOX = _num("ADSB_POS_UPDATE_SEC_BOX", 120)
+# "22:00-06:00" suppresses non-emergency ADS-B alerts overnight. The live board
+# keeps refreshing regardless. Empty means never quiet.
+ADSB_QUIET_HOURS = os.environ.get("ADSB_QUIET_HOURS", "").strip()
+# How much civil traffic reaches the flights channel:
+#   airline  — scheduled airline movements, military, and anything anomalous
+#   mil_only — nothing civil at all
+#   all      — every ADS-B contact arriving or departing YBCG
+ADSB_CIVIL_REPORTING = _str("ADSB_CIVIL_REPORTING", "airline").lower()
+
+# Always alert on these, whatever the classifier thinks.
+ADSB_WATCH_HEX = _csv("ADSB_WATCH_HEX")
+ADSB_WATCH_CALLSIGN = _csv("ADSB_WATCH_CALLSIGN")
+
+# Live board.
+ADSB_BOARD_REFRESH_SEC = _num("ADSB_BOARD_REFRESH_SEC", 30)
+ADSB_BOARD_MAX_ROWS = _int("ADSB_BOARD_MAX_ROWS", 20)
+
+ADSB_HEX_BLOCKS_FILE = _str(
+    "ADSB_HEX_BLOCKS_FILE", os.path.join(_DATA_DIR, "adsb_hex_blocks.json")
+)
+ADSB_TYPES_FILE = _str(
+    "ADSB_TYPES_FILE", os.path.join(_DATA_DIR, "adsb_types.json")
+)
+ADSB_STATE_DB = _str(
+    "ADSB_STATE_DB", os.path.join(_DATA_DIR, "adsb_state.db")
+)
+# Aircraft silhouettes for the web map, so a C-17 draws as a C-17. Extracted
+# from tar1090 and therefore GPL-2.0-or-later — see the notice inside the file.
+ADSB_MARKER_SHAPES_FILE = _str(
+    "ADSB_MARKER_SHAPES_FILE", os.path.join(_DATA_DIR, "adsb_marker_shapes.json")
+)
+
+DISCORD_CHANNEL_MILITARY = os.environ.get("DISCORD_CHANNEL_MILITARY", "")
+DISCORD_CHANNEL_FLIGHTS = os.environ.get("DISCORD_CHANNEL_FLIGHTS", "")
+
+# Read-only local dashboard. Off by default; see README before binding this to
+# anything other than loopback.
+ADSB_WEB_ENABLED = _flag("ADSB_WEB_ENABLED", "0")
+ADSB_WEB_BIND = _str("ADSB_WEB_BIND", "127.0.0.1")
+ADSB_WEB_PORT = _int("ADSB_WEB_PORT", 8099)
+ADSB_WEB_TOKEN = os.environ.get("ADSB_WEB_TOKEN", "")
+
+# Same composition rule as DISCORD_ENABLED: the feature is on only when it has
+# somewhere to send its output.
+ADSB_ENABLED = bool(
+    _ADSB_ON
+    and (
+        (DISCORD_ENABLED and (DISCORD_CHANNEL_MILITARY or DISCORD_CHANNEL_FLIGHTS))
+        or ADSB_WEB_ENABLED
+    )
 )
 
 # HuggingFace token — required to download Whisper models.

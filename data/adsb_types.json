@@ -1,0 +1,65 @@
+{
+  "_comment": [
+    "ICAO type designators and operator-name keywords used by adsb_classify.",
+    "Edit freely — the classifier reloads this file when its mtime changes, so",
+    "you can add a type mid-airshow without restarting.",
+    "",
+    "Three tiers, because 'military' and 'interesting at an airshow' are not",
+    "the same question:",
+    "  military  — in service with an air arm somewhere. Strong signal.",
+    "  warbird   — ex-military airframe now on a civil register. This is what",
+    "              actually flies at Australian airshows: L-39s, Jet Provosts,",
+    "              a P-40 Kittyhawk was overhead Surfers as this was written.",
+    "  aerobatic — purpose-built display types. Weak on their own (a Pitts",
+    "              doing weekend circuits is not news); meaningful when they",
+    "              turn up inside the display box or with a display operator.",
+    "",
+    "Type codes are matched exactly against the feed's 't' field, uppercased."
+  ],
+
+  "_military_note": [
+    "Only types that are essentially NEVER civil belong here. Anything with a",
+    "large civil fleet must come out, however often an air force also flies it:",
+    "the multi-signal design already catches those via hex block, dbFlags or",
+    "callsign prefix, so listing them here buys nothing and costs false",
+    "positives. Learned the hard way — an early version listed A332 for the",
+    "RAAF KC-30A and promptly flagged a Qantas A330, a China Eastern A330 and",
+    "a maintenance ferry. Same for BE20 (King Air), CL60 (Challenger), FA7X",
+    "and GLF5: the RAAF examples all carry ADF hex addresses anyway."
+  ],
+  "military": [
+    "A400", "AV8B", "B1", "B2", "B52", "C130", "C17", "C2", "C27J", "C295",
+    "C30J", "C5M", "E2", "E3CF", "E3TF", "E6", "E737", "EA18", "EUFI", "F111",
+    "F117", "F14", "F15", "F16", "F18", "F22", "F35", "F5", "FA18", "GR4",
+    "H47", "CH47", "H60", "MH60", "S70", "HAWK", "J8", "JAS39", "K35R",
+    "KC46", "KC10", "M346", "MQ9", "MRH9", "NH90", "P1", "P3", "P8", "PC21",
+    "PC9", "RC135", "RFAL", "RQ4", "SU25", "SU30", "SU34", "T38", "T45",
+    "TEX2", "TIGR", "TOR", "U2", "V22"
+  ],
+
+  "warbird": [
+    "A37", "B17", "B25", "BE18", "C47", "CA18", "CA25", "CJ6", "CT4", "DC3",
+    "DH82", "DHC1", "F4U", "F6F", "F86", "FURY", "G21", "HRCN", "HUNT", "JPRO", "L29",
+    "L39", "MSTG", "MG15", "MG17", "MI2", "P38", "P39", "P40", "P47", "P51",
+    "PROV", "S211", "SB2C", "SBR", "SEAF", "SF26", "SPIT", "T2", "T28", "T33",
+    "T34", "T6", "TBM", "VAMP", "WNJL", "YK11", "YK50", "YK52", "YK55", "ZLIN"
+  ],
+
+  "aerobatic": [
+    "E300", "E330", "E500", "EA30", "EDGE", "G164", "MX2", "PTS2", "PTSS",
+    "S1", "S2", "SBLT", "SU26", "SU29", "SU31", "XA41", "XA42", "CAP2", "CAP3"
+  ],
+
+  "operator_keywords": [
+    "AIR FORCE", "AIRFORCE", "ROYAL AUSTRALIAN AIR FORCE", "RAAF",
+    "DEPARTMENT OF DEFENCE", "DEFENCE", "DEFENSE", "COMMONWEALTH OF AUSTRALIA",
+    "ROYAL AUSTRALIAN NAVY", "AUSTRALIAN ARMY", "MINISTRY OF DEFENCE",
+    "UNITED STATES AIR FORCE", "US AIR FORCE", "USAF", "US NAVY", "US ARMY",
+    "AIRSHOW", "AIR SHOW", "AEROBATIC", "AEROBATICS", "DISPLAY TEAM",
+    "WARBIRD", "WARBIRDS", "HISTORIC AIRCRAFT", "HISTORICAL AIRCRAFT",
+    "CLASSIC JET", "CLASSIC FIGHTER", "VINTAGE FIGHTER",
+    "PERFORMANCE AERO", "PAUL BENNET", "SKY ACES", "RUSSIAN ROOLETTES",
+    "TEMORA AVIATION", "HARS", "PACIFIC AIRSHOW", "AIR AFFAIRS",
+    "BORDER FORCE", "CUSTOMS"
+  ]
+}
