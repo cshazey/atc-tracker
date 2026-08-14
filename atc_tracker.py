@@ -94,6 +94,38 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class _TranscriptFeed:
+    """Thread-safe ring of the most recent ATC transcripts, for the web map.
+
+    The dashboard shows the latest radio calls beside the traffic picture, so
+    you can see what is being *said* next to what is being *tracked*. This is a
+    read-through of what already goes to Discord — nothing is transcribed twice
+    and no audio is retained here, only the text.
+    """
+
+    def __init__(self, maxlen: int):
+        self._items: collections.deque = collections.deque(maxlen=max(1, maxlen))
+        self._lock = threading.Lock()
+
+    def add(self, item: dict) -> None:
+        with self._lock:
+            self._items.append(item)
+
+    def recent(self, limit: int = 40) -> list:
+        with self._lock:
+            items = list(self._items)
+        items.reverse()
+        return items[: max(0, limit)]
+
+
+_transcript_feed = _TranscriptFeed(config.ADSB_WEB_NOTES)
+
+
+def recent_transcripts(limit: int = 40) -> list:
+    """Newest-first ATC transcripts for the web dashboard's `/api/notes`."""
+    return _transcript_feed.recent(limit)
+
+
 # ---------------------------------------------------------------------------
 # Shared runtime state
 # ---------------------------------------------------------------------------
@@ -819,6 +851,15 @@ class Transcriber:
             tier = max(tier, TIER_INTEREST)
         _send_telegram(text, ts, icao, station_name, tier, military)
         _send_discord(text, ts, ts_iso, icao, station_name, tier, rec_name, military)
+        _transcript_feed.add({
+            "at": time.time(),
+            "ts": ts,
+            "icao": icao,
+            "station": station_name,
+            "text": text,
+            "tier": tier,
+            "military": [m.label for m in military if m.strong],
+        })
         if self._log_file:
             try:
                 with open(self._log_file, "a", encoding="utf-8") as f:
@@ -1636,8 +1677,20 @@ def _send_adsb_event(ev, state: SharedState) -> None:
     embed = _adsb_event_embed(ev)
     emergency = ev.tier >= TIER_EMERGENCY
 
-    for channel_id in _adsb_channels_for(ev):
-        _enqueue_discord(channel_id, embed=dict(embed), priority=emergency)
+    # The live-card view already carries these — a fresh post per poll is
+    # exactly the position spam we are getting rid of, so route them to the
+    # cards only. Emergencies, box entries and aerodrome movements are discrete
+    # and still worth their own message.
+    cards_on = config.DISCORD_ENABLED and config.ADSB_LIVE_CARDS_ENABLED
+    card_covered = ev.kind in (
+        adsb_tracker.EV_APPEARED,
+        adsb_tracker.EV_POSITION,
+        adsb_tracker.EV_DISAPPEARED,
+        adsb_tracker.EV_BOX_EXIT,
+    )
+    if not (cards_on and card_covered):
+        for channel_id in _adsb_channels_for(ev):
+            _enqueue_discord(channel_id, embed=dict(embed), priority=emergency)
 
     if emergency and config.DISCORD_ALERTS_CHANNEL_ID:
         _enqueue_discord(
@@ -1648,14 +1701,12 @@ def _send_adsb_event(ev, state: SharedState) -> None:
             allowed_mentions={"parse": ["everyone"]},
         )
 
-    # Telegram mirrors only the things worth a phone buzz.
+    # Telegram mirrors only the things worth a phone buzz. A transponder drop
+    # over water flaps, so it is deliberately not one of them.
     if config.TELEGRAM_ENABLED and (
         emergency
-        or (ev.military and ev.kind in (
-            adsb_tracker.EV_APPEARED,
-            adsb_tracker.EV_DISAPPEARED,
-            adsb_tracker.EV_BOX_ENTER,
-        ))
+        or ev.kind == adsb_tracker.EV_BOX_ENTER
+        or (ev.military and ev.kind == adsb_tracker.EV_APPEARED)
     ):
         detail = f"\n{html.escape(ev.detail)}" if ev.detail else ""
         _post_telegram(f"<b>{html.escape(ev.headline)}</b>{detail}")
@@ -1709,6 +1760,211 @@ def _adsb_board_embed(board: dict) -> dict:
     }
 
 
+_CARD_COLOURS = {
+    "box": 0xE74C3C,
+    "mil": 0xE67E22,
+    "prob": 0x95A5A6,
+    "lost": 0x596273,
+}
+
+
+def _card_position_line(row: dict) -> str:
+    bits = []
+    if row.get("on_ground"):
+        bits.append("on the ground")
+    elif row.get("alt_ft") is not None:
+        bits.append(f"{row['alt_ft']:,} ft")
+    if row.get("gs_kt"):
+        bits.append(f"{row['gs_kt']:.0f} kt")
+    if row.get("dist_nm") is not None and row.get("bearing") is not None:
+        bits.append(
+            f"{row['dist_nm']:.0f} nm {geo.compass_point(row['bearing'])} "
+            f"of {config.ADSB_HOME_ICAO}"
+        )
+    if row.get("track_deg") is not None:
+        bits.append(f"hdg {row['track_deg']:.0f}°")
+    return " · ".join(bits)
+
+
+def _member_label(row: dict) -> str:
+    return row.get("ident") or row.get("reg") or row.get("hex", "").upper()
+
+
+class _AdsbLiveCards:
+    """One editable Discord message per active contact or formation.
+
+    Turns the per-poll position feed into a living picture. A card opens when a
+    contact — or a formation of them — is first tracked, is edited in place as
+    it moves, and is finalised to its last-known state when it drops out of
+    range. Two KC-30As therefore cost two messages that update quietly in
+    place, not sixteen that scroll the channel.
+
+    Driven entirely from the board snapshot on the poll thread, so there is a
+    single writer and no lock is needed. A new card is opened with a blocking
+    POST — rare, only on a genuinely new sighting — to capture the message id;
+    every later edit goes through the async outbox.
+    """
+
+    def __init__(self):
+        self._cards: dict = {}
+
+    def sync(self, board: dict, channel_id: str) -> None:
+        if not (config.DISCORD_ENABLED and config.ADSB_LIVE_CARDS_ENABLED and channel_id):
+            return
+        now = time.time()
+        rows = board.get("military") or []
+        radius = config.ADSB_FORMATION_RADIUS_NM if config.ADSB_FORMATION_ENABLED else 0.0
+        groups = adsb_tracker.group_formations(
+            rows,
+            radius_nm=radius,
+            alt_band_ft=config.ADSB_FORMATION_ALT_BAND_FT,
+            min_size=config.ADSB_FORMATION_MIN,
+        )
+        busy = _discord_outbox is not None and _discord_outbox.depth() > 40
+
+        matched = set()
+        # New cards open with a blocking POST (to capture the message id), so
+        # cap how many we open in one pass — a mass launch then spreads its new
+        # cards over a few board cycles instead of stalling the poll thread.
+        new_budget = 4
+        for g in groups:
+            key = self._match(g, matched)
+            matched.add(key)
+            card = self._cards.get(key)
+            body, embed = self._embed(g, now, lost=False)
+            if card is None:
+                active = sum(1 for c in self._cards.values() if not c["retired"])
+                if active >= config.ADSB_LIVE_CARDS_MAX or new_budget <= 0:
+                    continue
+                message_id = _post_discord(channel_id, embed=embed)
+                if not message_id:
+                    continue
+                new_budget -= 1
+                self._cards[key] = {
+                    "message_id": message_id, "channel": channel_id, "body": body,
+                    "hexes": set(g["hexes"]), "group": g, "created": now,
+                    "updated": now, "seen": now, "lost": False, "lost_at": 0.0,
+                    "retired": False,
+                }
+            else:
+                relit = card["lost"]
+                card.update(hexes=set(g["hexes"]), group=g, seen=now, lost=False)
+                if (body != card["body"] or relit) and not busy:
+                    card.update(body=body, updated=now)
+                    _enqueue_discord(channel_id, embed=embed, message_id=card["message_id"])
+        self._retire_absent(matched, now)
+
+    def _match(self, group: dict, taken: set) -> str:
+        """Reuse the card sharing the most aircraft with this group.
+
+        Keying on membership keeps a card stable as aircraft join or leave a
+        formation; only a group that shares nothing with any live card opens a
+        new one.
+        """
+        hexes = set(group["hexes"])
+        best_key, best = None, 0
+        for key, card in self._cards.items():
+            if key in taken or card["retired"]:
+                continue
+            overlap = len(hexes & card["hexes"])
+            if overlap > best:
+                best, best_key = overlap, key
+        if best_key is not None:
+            return best_key
+        return group["key"] or (min(hexes) if hexes else f"card{len(self._cards)}")
+
+    def _retire_absent(self, matched: set, now: float) -> None:
+        for key, card in list(self._cards.items()):
+            if key in matched or card["retired"]:
+                continue
+            if not card["lost"]:
+                body, embed = self._embed(card["group"], now, lost=True)
+                if body != card["body"]:
+                    card["body"] = body
+                    _enqueue_discord(card["channel"], embed=embed, message_id=card["message_id"])
+                card.update(lost=True, lost_at=now)
+            elif now - card["lost_at"] >= config.ADSB_CARD_RETIRE_SEC:
+                card["retired"] = True
+
+    def _embed(self, group: dict, now: float, lost: bool) -> tuple:
+        formation = group["formation"] and group["size"] >= 2
+        icon = "\U0001f507" if lost else ("\U0001f3af" if group["in_box"] else "\U0001f4e1")
+        label, typ, members = group["label"], group["family"] or "?", group["members"]
+
+        if formation:
+            head = f"{icon} {label} formation · {group['size']}× {typ}"
+        else:
+            subtype = members[0].get("type") or members[0].get("desc") or ""
+            head = f"{icon} {label}" + (f" — {subtype}" if subtype else "")
+
+        lines = []
+        if group["title"]:
+            lines.append(f"**{group['title']}**")
+        if formation:
+            summary = [f"{group['size']} aircraft"]
+            if group["alt_min"] is not None and group["alt_max"] is not None:
+                summary.append(
+                    f"{group['alt_min']:,} ft" if group["alt_min"] == group["alt_max"]
+                    else f"{group['alt_min']:,}–{group['alt_max']:,} ft"
+                )
+            if group["dist_nm"] is not None and group["bearing"] is not None:
+                summary.append(
+                    f"{group['dist_nm']:.0f} nm {geo.compass_point(group['bearing'])} "
+                    f"of {config.ADSB_HOME_ICAO}"
+                )
+            lines.append(" · ".join(summary))
+            for m in members[:8]:
+                lines.append(f"• **{_member_label(m)}** — {_card_position_line(m) or '?'}")
+            if group["size"] > 8:
+                lines.append(f"…and {group['size'] - 8} more")
+        else:
+            pos = _card_position_line(members[0])
+            if pos:
+                lines.append(pos)
+        if lost:
+            when = datetime.fromtimestamp(now, _AEST).strftime("%H:%M")
+            lines.append(f"_No longer in range — last tracked ~{when}._")
+        globe = members[0].get("url") or ""
+        if globe:
+            lines.append(f"[Track on globe.adsbexchange.com]({globe})")
+
+        colour = (
+            _CARD_COLOURS["lost"] if lost
+            else _CARD_COLOURS["box"] if group["in_box"]
+            else _CARD_COLOURS["mil"] if group["military"]
+            else _CARD_COLOURS["prob"]
+        )
+        embed = {
+            "title": head[:256],
+            "description": "\n".join(lines)[:4096],
+            "color": colour,
+            "footer": {"text": f"updated {_now_ts()} · data adsb.fi"},
+            "timestamp": _now_iso(),
+        }
+        fields = []
+        if formation:
+            fields.append({"name": "Aircraft", "value": str(group["size"]), "inline": True})
+            fields.append({"name": "Type", "value": typ, "inline": True})
+        else:
+            m0 = members[0]
+            if m0.get("reg"):
+                fields.append({"name": "Registration", "value": m0["reg"], "inline": True})
+            if m0.get("type"):
+                fields.append({"name": "Type", "value": m0["type"], "inline": True})
+            if m0.get("squawk"):
+                fields.append({"name": "Squawk", "value": m0["squawk"], "inline": True})
+        reasons = members[0].get("reasons")
+        if reasons:
+            fields.append({"name": "Matched on", "value": reasons[:1024], "inline": False})
+        if fields:
+            embed["fields"] = fields[:6]
+
+        # Change-detection key: what a reader would see, minus the footer clock
+        # (so an unmoved aircraft is not re-edited every single poll).
+        return head + "|" + "\n".join(lines), embed
+
+
+_adsb_live_cards: Optional["_AdsbLiveCards"] = None
 _adsb_board_last: dict = {}
 
 
@@ -1726,6 +1982,16 @@ def _broadcast_adsb_board(board: dict) -> None:
     channel_id = config.DISCORD_CHANNEL_MILITARY or config.DISCORD_CHANNEL_FLIGHTS
     if not channel_id:
         return
+
+    # Live cards manage their own change detection and backpressure, so refresh
+    # them before the board's own guards below can early-return.
+    if _adsb_live_cards is not None:
+        try:
+            _adsb_live_cards.sync(board, channel_id)
+        except Exception as exc:
+            if _display_ref is not None:
+                _display_ref.log(Text(f"⚠ ADS-B live cards failed: {exc}", style="dim yellow"))
+
     if _discord_outbox is not None and _discord_outbox.depth() > 50:
         return
 
@@ -2830,9 +3096,11 @@ def main() -> None:
         _init_adsb_board_messages(state)
 
     with display:
-        global _discord_outbox, _transcriber_ref, _adsb_poller
+        global _discord_outbox, _transcriber_ref, _adsb_poller, _adsb_live_cards
         if config.DISCORD_ENABLED:
             _discord_outbox = DiscordOutbox()
+            if config.ADSB_LIVE_CARDS_ENABLED and not args.no_adsb:
+                _adsb_live_cards = _AdsbLiveCards()
 
         kb_thread = threading.Thread(
             target=_keyboard_listener, args=(state,), daemon=True, name="keyboard"
@@ -2893,6 +3161,10 @@ def main() -> None:
                     Text(msg, style="dim yellow" if warn else "dim cyan")
                 ),
             )
+            # With live cards driving Discord, the per-poll position events are
+            # redundant — the cards already show current position — so stop the
+            # state machine minting them at all.
+            _adsb_poller.emit_position_events = _adsb_live_cards is None
             threading.Thread(
                 target=_adsb_poller.run, daemon=True, name="adsb-poll"
             ).start()
@@ -2902,9 +3174,10 @@ def main() -> None:
                     target=adsb_web.serve,
                     args=(_adsb_poller, state.stop_event),
                     kwargs={
+                        "notes_provider": recent_transcripts,
                         "on_log": lambda msg, warn=False: display.log(
                             Text(msg, style="dim yellow" if warn else "dim cyan")
-                        )
+                        ),
                     },
                     daemon=True,
                     name="adsb-web",

@@ -68,6 +68,17 @@ _PAGE = """<!doctype html>
            color:#6f7d8d; font-size:11px; }
   .leaflet-container { background:#0b0e13; }
   .plane { font-size:19px; line-height:19px; text-shadow:0 0 4px #000; }
+  .note { border-left:3px solid #4d94d6; background:#141a22; border-radius:5px;
+          padding:5px 8px; margin-bottom:5px; font-size:12px; }
+  .note.int { border-left-color:#e67e22; }
+  .note.emg { border-left-color:#e74c3c; background:#1d1618; }
+  .note .st { font-weight:600; color:#9fb3c8; }
+  .note .tm { color:#6f7d8d; float:right; font-size:11px; }
+  .note .mil { color:#e67e22; font-size:11px; margin-left:4px; }
+  .note .tx { display:block; margin-top:2px; color:#dbe5ef; }
+  .ev { font-size:12px; color:#aab7c6; padding:3px 1px; border-bottom:1px solid #1b212b; }
+  .ev .tm { color:#6f7d8d; }
+  .ev b { color:#dbe5ef; }
   @media (max-width: 720px) {
     #map { inset:0 0 45% 0; } #side { top:55%; width:100%; border-left:none;
     border-top:1px solid #232a34; }
@@ -79,9 +90,11 @@ _PAGE = """<!doctype html>
 <div id="side">
   <h1>Gold Coast air picture</h1>
   <div class="sub" id="status">connecting…</div>
+  <h2>Latest ATC</h2><div id="notes"><div class="empty">Listening…</div></div>
   <h2>Military &amp; display</h2><div id="mil"></div>
   <h2>Display box</h2><div id="box"></div>
   <h2>All airborne</h2><div id="all"></div>
+  <h2>Recent activity</h2><div id="events"><div class="empty">Nothing yet.</div></div>
   <footer>
     Data from <a href="https://adsb.fi" target="_blank" rel="noopener">adsb.fi</a>,
     used under their personal non-commercial terms.<br>
@@ -143,9 +156,24 @@ function svgIcon(a, colour) {
 }
 
 let markers = {};
+let trails = {};
 function colourFor(a) {
   return a.in_box ? '#e74c3c' : (a.military ? '#e67e22'
        : (a.probable ? '#c9d1d9' : '#4d94d6'));
+}
+function trailStyle(a) {
+  return {color: colourFor(a),
+          weight: (a.in_box || a.military) ? 2.5 : 1.5,
+          opacity: a.in_box ? 0.85 : (a.military ? 0.6 : 0.3)};
+}
+function esc(s) {
+  return (s == null ? '' : String(s)).replace(/[&<>"]/g,
+    m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+}
+function fmtTime(epoch) {
+  try { return new Date(epoch * 1000)
+    .toLocaleTimeString('en-AU', {hour:'2-digit', minute:'2-digit'}); }
+  catch (e) { return ''; }
 }
 function icon(a) {
   const colour = colourFor(a);
@@ -207,9 +235,21 @@ async function tick() {
         markers[a.hex] = L.marker([a.lat, a.lon], {icon: icon(a)})
           .addTo(map).bindPopup(label(a));
       }
+      // Breadcrumb flight path. Drawn under the markers so the aircraft glyph
+      // always sits on top of its own trail.
+      const tr = a.trail || [];
+      if (tr.length >= 2) {
+        if (trails[a.hex]) trails[a.hex].setLatLngs(tr).setStyle(trailStyle(a));
+        else trails[a.hex] = L.polyline(tr, trailStyle(a)).addTo(map);
+      } else if (trails[a.hex]) {
+        map.removeLayer(trails[a.hex]); delete trails[a.hex];
+      }
     }
     for (const hex of Object.keys(markers)) {
-      if (!seen.has(hex)) { map.removeLayer(markers[hex]); delete markers[hex]; }
+      if (!seen.has(hex)) {
+        map.removeLayer(markers[hex]); delete markers[hex];
+        if (trails[hex]) { map.removeLayer(trails[hex]); delete trails[hex]; }
+      }
     }
     fill('mil', d.military, 'Nothing military or unusual in range.');
     fill('box', d.box, 'The display box is empty.');
@@ -222,7 +262,44 @@ async function tick() {
     document.getElementById('status').textContent = 'lost contact with the tracker: ' + e.message;
   }
 }
+const EV_ICON = {appeared:'📡', disappeared:'🔇', box_enter:'🎯', box_exit:'↗️',
+  departure:'🛫', inbound:'🛬', landed:'🛬', emergency:'🚨', position:'🎯'};
+
+async function tickNotes() {
+  try {
+    const r = await fetch(q('/api/notes'));
+    if (!r.ok) return;
+    const notes = await r.json();
+    const el = document.getElementById('notes');
+    if (!notes.length) { el.innerHTML = '<div class="empty">No radio calls yet.</div>'; return; }
+    el.innerHTML = notes.map(n => {
+      const cls = n.tier >= 2 ? 'emg' : (n.tier >= 1 ? 'int' : '');
+      const mil = (n.military && n.military.length)
+        ? `<span class="mil">🎖 ${esc(n.military.join(', '))}</span>` : '';
+      return `<div class="note ${cls}"><span class="tm">${fmtTime(n.at)}</span>`
+        + `<span class="st">${esc(n.icao)}</span>${mil}`
+        + `<span class="tx">${esc(n.text)}</span></div>`;
+    }).join('');
+  } catch (e) {}
+}
+
+async function tickEvents() {
+  try {
+    const r = await fetch(q('/api/events'));
+    if (!r.ok) return;
+    const evs = await r.json();
+    const el = document.getElementById('events');
+    if (!evs.length) { el.innerHTML = '<div class="empty">Nothing yet.</div>'; return; }
+    el.innerHTML = evs.slice(0, 15).map(e =>
+      `<div class="ev"><span class="tm">${fmtTime(e.at)}</span> ${EV_ICON[e.kind] || '✈️'} `
+      + `<b>${esc(e.ident || e.hex.toUpperCase())}</b> ${esc(e.detail || e.kind)}</div>`
+    ).join('');
+  } catch (e) {}
+}
+
 tick(); setInterval(tick, 5000);
+tickNotes(); setInterval(tickNotes, 7000);
+tickEvents(); setInterval(tickEvents, 9000);
 </script>
 </body>
 </html>
@@ -283,6 +360,7 @@ def _marker_version() -> str:
 
 class _Handler(BaseHTTPRequestHandler):
     poller = None
+    notes_provider = None
     server_version = "atc-tracker"
     sys_version = ""
 
@@ -341,6 +419,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
         elif path == "/api/events":
             self._json(self._events())
+        elif path == "/api/notes":
+            self._json(self._notes())
         elif path == "/api/health":
             self._json(self.poller.health() if self.poller else {"error": "not running"})
         else:
@@ -375,6 +455,15 @@ class _Handler(BaseHTTPRequestHandler):
         if self.poller is None or self.poller.store is None:
             return []
         return self.poller.store.recent_events(50)
+
+    def _notes(self) -> list:
+        """Recent ATC transcripts, so the map sits beside the voice picture."""
+        if self.notes_provider is None:
+            return []
+        try:
+            return self.notes_provider(config.ADSB_WEB_NOTES)
+        except Exception:
+            return []
 
 
 def tailscale_ip() -> str:
@@ -458,9 +547,14 @@ def bind_addresses() -> tuple:
     return (bind,), note
 
 
-def serve(poller, stop_event=None, on_log=None) -> None:
+def serve(poller, stop_event=None, on_log=None, notes_provider=None) -> None:
     """Run the dashboard until stop_event is set. Intended as a thread body."""
-    handler = type("_BoundHandler", (_Handler,), {"poller": poller})
+    attrs = {"poller": poller}
+    if notes_provider is not None:
+        # staticmethod so the attribute stays a plain callable rather than
+        # binding `self` when accessed through the handler instance.
+        attrs["notes_provider"] = staticmethod(notes_provider)
+    handler = type("_BoundHandler", (_Handler,), attrs)
     addresses, note = bind_addresses()
 
     servers = []

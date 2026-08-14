@@ -150,6 +150,12 @@ class Track:
     home_bearing: Optional[float] = None
 
     history: collections.deque = field(default_factory=lambda: collections.deque(maxlen=60))
+    # Recent (lat, lon) breadcrumbs for the map to draw a flight path. Separate
+    # from `history` (which keeps distance/altitude for the closing-rate maths)
+    # because the map wants positions and nothing else.
+    trail: collections.deque = field(
+        default_factory=lambda: collections.deque(maxlen=config.ADSB_TRAIL_LEN)
+    )
     classification: adsb_classify.Classification = adsb_classify.NOT_INTERESTING
 
     last_position_alert_at: float = 0.0
@@ -228,7 +234,11 @@ class Track:
             "title": self.classification.title,
             "reasons": self.classification.reason_text(),
             "last_seen": self.last_seen,
+            "first_seen": self.first_seen,
             "seen_count": self.seen_count,
+            # Breadcrumb line for the map. Rounded on capture; a list of
+            # [lat, lon] pairs oldest-first.
+            "trail": [[la, lo] for la, lo in self.trail],
             "url": self.globe_url(),
         }
 
@@ -325,6 +335,12 @@ class AdsbPoller:
         self.tracks: dict = {}
         self._lock = threading.RLock()
         self.enabled = True
+        # When the live-card view is driving Discord, per-poll position events
+        # are redundant: the cards already show current position, refreshed
+        # from the board snapshot. main() clears this so the state machine
+        # stops minting EV_POSITION at all rather than having them suppressed
+        # downstream (and needlessly spending the alert token bucket).
+        self.emit_position_events = True
         self.polls = 0
         self.last_poll_at = 0.0
         self.last_mil_sweep_at = 0.0
@@ -471,6 +487,7 @@ class AdsbPoller:
                 config.ADSB_HOME_LAT, config.ADSB_HOME_LON, rep.lat, rep.lon
             )
             track.history.append((now, track.home_dist_nm, track.alt_ft))
+            track.trail.append((round(rep.lat, 5), round(rep.lon, 5)))
 
         strict_in = self._inside_box(track.lat, track.lon, track.alt_ft, strict=True)
         track.classification = adsb_classify.classify(
@@ -687,6 +704,8 @@ class AdsbPoller:
 
     def _check_position_update(self, track: Track, now: float) -> list:
         """Periodic position refresh for tracked military aircraft only."""
+        if not self.emit_position_events:
+            return []
         if not track.classification.military:
             return []
         # Only for confirmed tracks. A contact still being confirmed has not
@@ -1022,6 +1041,150 @@ def _is_hex(text: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+# --- formation grouping ----------------------------------------------------
+#
+# Aircraft of the same type flying together should read as one contact, not N.
+# The six Roulettes PC-21s are one display; a pair of KC-30As transiting in
+# company are one movement. This is a pure function of a board snapshot (the
+# rows Track.as_dict produces) so the tests can drive it without the poll
+# thread. Two aircraft join the same group when they share a type designator,
+# sit within `radius_nm` of each other, and are inside a shared altitude band —
+# so a high transit and a low display of the same type stay apart.
+
+
+def _family_key(row: dict) -> str:
+    """What makes two aircraft 'the same kind' for grouping."""
+    return (row.get("type") or row.get("desc") or "").strip().upper()
+
+
+def _rows_close(a: dict, b: dict, radius_nm: float, alt_band_ft: float) -> bool:
+    la, lo, lb, lob = a.get("lat"), a.get("lon"), b.get("lat"), b.get("lon")
+    if la is None or lo is None or lb is None or lob is None:
+        return False
+    if geo.haversine_nm(la, lo, lb, lob) > radius_nm:
+        return False
+    aa, ab = a.get("alt_ft"), b.get("alt_ft")
+    if aa is not None and ab is not None and abs(aa - ab) > alt_band_ft:
+        return False
+    return True
+
+
+def _common_prefix(rows: list) -> str:
+    """Shared callsign stem across a formation, e.g. RLTS1..RLTS6 -> 'RLTS'."""
+    prefixes = []
+    for r in rows:
+        stem = adsb_classify.split_ident(r.get("ident", ""))[0]
+        if len(stem) >= 3:
+            prefixes.append(stem)
+    if not prefixes or len(prefixes) < len(rows):
+        return ""
+    common = prefixes[0]
+    for stem in prefixes[1:]:
+        while common and not stem.startswith(common):
+            common = common[:-1]
+    return common if len(common) >= 3 else ""
+
+
+def _group_label(members: list, family: str) -> str:
+    if len(members) == 1:
+        m = members[0]
+        return m.get("ident") or m.get("reg") or m.get("hex", "").upper()
+    return _common_prefix(members) or family or "formation"
+
+
+def _summarise_group(members: list, family: str) -> dict:
+    """Build the group dict the cards and board rows render from."""
+    pos = [m for m in members if m.get("lat") is not None and m.get("lon") is not None]
+    if pos:
+        lat = sum(m["lat"] for m in pos) / len(pos)
+        lon = sum(m["lon"] for m in pos) / len(pos)
+        dist = geo.haversine_nm(config.ADSB_HOME_LAT, config.ADSB_HOME_LON, lat, lon)
+        bearing = geo.bearing_deg(config.ADSB_HOME_LAT, config.ADSB_HOME_LON, lat, lon)
+    else:
+        lat = lon = dist = bearing = None
+    alts = [m["alt_ft"] for m in members if m.get("alt_ft") is not None]
+    hexes = sorted(m.get("hex", "") for m in members)
+    return {
+        "key": hexes[0] if hexes else "",
+        "hexes": hexes,
+        "members": members,
+        "size": len(members),
+        "formation": False,
+        "family": family,
+        "label": _group_label(members, family),
+        "title": next((m.get("title") for m in members if m.get("title")), ""),
+        "military": any(m.get("military") for m in members),
+        "probable": all(m.get("probable") and not m.get("military") for m in members),
+        "in_box": any(m.get("in_box") for m in members),
+        "lat": lat,
+        "lon": lon,
+        "dist_nm": dist,
+        "bearing": bearing,
+        "alt_min": min(alts) if alts else None,
+        "alt_max": max(alts) if alts else None,
+    }
+
+
+def group_formations(
+    rows: list,
+    *,
+    radius_nm: float = 12.0,
+    alt_band_ft: float = 5000.0,
+    min_size: int = 2,
+) -> list:
+    """Collapse same-type aircraft flying together into single groups.
+
+    Returns one dict per group (singleton or formation), nearest first. A group
+    of `min_size` or more positioned same-type aircraft is marked
+    ``formation``. Pass ``radius_nm <= 0`` to disable merging entirely — every
+    aircraft comes back as its own singleton, which is how the caller honours
+    ADSB_FORMATION_ENABLED without a second code path.
+    """
+    positioned, loners = [], []
+    for r in rows:
+        (positioned if r.get("lat") is not None and r.get("lon") is not None
+         else loners).append(r)
+
+    groups = []
+    if radius_nm > 0:
+        by_family: dict = {}
+        for r in positioned:
+            by_family.setdefault(_family_key(r), []).append(r)
+        for family, members in by_family.items():
+            pool = list(members)
+            while pool:
+                cluster = [pool.pop()]
+                changed = True
+                while changed:
+                    changed = False
+                    for cand in list(pool):
+                        if any(_rows_close(cand, c, radius_nm, alt_band_ft) for c in cluster):
+                            cluster.append(cand)
+                            pool.remove(cand)
+                            changed = True
+                groups.append((family, cluster))
+    else:
+        groups = [(_family_key(r), [r]) for r in positioned]
+
+    out = []
+    for family, members in groups:
+        members.sort(key=lambda m: (m.get("first_seen") or 0.0, m.get("hex", "")))
+        if min_size >= 2 and len(members) >= min_size:
+            g = _summarise_group(members, family)
+            g["formation"] = True
+            out.append(g)
+        else:
+            # Below the formation threshold: show each aircraft on its own
+            # rather than merging a pair the operator asked to keep separate.
+            for m in members:
+                out.append(_summarise_group([m], family))
+    for r in loners:
+        out.append(_summarise_group([r], _family_key(r)))
+
+    out.sort(key=lambda g: (g["dist_nm"] is None, g["dist_nm"] or 0.0))
+    return out
 
 
 # --- CLI -------------------------------------------------------------------

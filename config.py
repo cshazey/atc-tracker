@@ -644,6 +644,39 @@ ADSB_WATCH_CALLSIGN = _csv("ADSB_WATCH_CALLSIGN")
 ADSB_BOARD_REFRESH_SEC = _num("ADSB_BOARD_REFRESH_SEC", 30)
 ADSB_BOARD_MAX_ROWS = _int("ADSB_BOARD_MAX_ROWS", 20)
 
+# Live "actively spotted" cards. Instead of a fresh Discord post every time a
+# tracked military aircraft moves — which is what turned two KC-30As into
+# sixteen notifications in ten minutes — each aircraft (or formation) gets one
+# message that is edited in place with its current position. It reads as a
+# living picture rather than a scrolling feed, and it collapses the per-poll
+# position spam to zero new messages.
+ADSB_LIVE_CARDS_ENABLED = _flag("ADSB_LIVE_CARDS_ENABLED", "1")
+# Safety valve: if more than this many distinct contacts/formations are up at
+# once, stop opening new cards and let the pinned board carry the overflow.
+ADSB_LIVE_CARDS_MAX = _int("ADSB_LIVE_CARDS_MAX", 12)
+# A card whose aircraft has been gone this long is finalised (edited to its
+# last-known state) and retired, so a re-appearance opens a fresh sighting.
+ADSB_CARD_RETIRE_SEC = _num("ADSB_CARD_RETIRE_SEC", 300)
+
+# Formation consolidation. Aircraft of the same type flying together — the six
+# Roulettes PC-21s, a pair of KC-30As — collapse into a single card and a
+# single board row instead of one each. "Together" means same type designator,
+# within ADSB_FORMATION_RADIUS_NM of each other, and inside a shared altitude
+# band (a high transit and a low display of the same type stay separate).
+ADSB_FORMATION_ENABLED = _flag("ADSB_FORMATION_ENABLED", "1")
+ADSB_FORMATION_RADIUS_NM = _num("ADSB_FORMATION_RADIUS_NM", 12)
+ADSB_FORMATION_ALT_BAND_FT = _num("ADSB_FORMATION_ALT_BAND_FT", 5000)
+ADSB_FORMATION_MIN = _int("ADSB_FORMATION_MIN", 2)
+
+# Flight-path trail. How many recent positions to keep per aircraft for the
+# map to draw a breadcrumb line. 30 points at a 10s poll is the last ~5 min.
+ADSB_TRAIL_LEN = _int("ADSB_TRAIL_LEN", 30)
+
+# ATC transcript feed shown on the web map. The dashboard pulls the most recent
+# radio calls so the map and the voice picture sit side by side. This only caps
+# the in-memory ring; transcripts still go to Discord/Telegram as before.
+ADSB_WEB_NOTES = _int("ADSB_WEB_NOTES", 40)
+
 ADSB_HEX_BLOCKS_FILE = _str(
     "ADSB_HEX_BLOCKS_FILE", os.path.join(_DATA_DIR, "adsb_hex_blocks.json")
 )
