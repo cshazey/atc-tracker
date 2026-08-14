@@ -547,6 +547,11 @@ ADSB_RADIUS_NM = _num("ADSB_RADIUS_NM", 60)
 ADSB_BOX_BBOX = _str("ADSB_BOX_BBOX", "-28.06,-27.94,153.42,153.52")
 ADSB_BOX_POLYGON = os.environ.get("ADSB_BOX_POLYGON", "")
 ADSB_BOX_MAX_ALT_FT = _num("ADSB_BOX_MAX_ALT_FT", 6000)
+# The box is a volume, not a footprint: an aircraft above this height is
+# overflying on the airway, not displaying, and does not count as inside
+# however its ground track reads. Without a ceiling every airliner routed over
+# the strip triggers a box entry.
+ADSB_BOX_CEILING_FT = _num("ADSB_BOX_CEILING_FT", 10000)
 # Hysteresis: "inside" uses the box, "outside" uses it grown by this much, and
 # between the two the previous state holds. Without it an aircraft orbiting the
 # boundary emits an enter/exit pair every poll.

@@ -342,14 +342,21 @@ class AdsbPoller:
 
     # -- geometry ---------------------------------------------------------
 
-    def _inside_box(self, lat, lon, strict: bool) -> bool:
+    def _inside_box(self, lat, lon, alt_ft, strict: bool) -> bool:
         """strict=True tests the real box; False tests the inflated one.
 
         Two boundaries make the dead band: a track is only "in" once it clears
         the inner edge and only "out" once it clears the outer one, so sitting
         on the line cannot produce an enter/exit stream.
+
+        The box has a ceiling too: an aircraft above ADSB_BOX_CEILING_FT is
+        overflying on the airway, not displaying, so it counts as outside
+        whatever its ground track reads. An unknown altitude is not treated as
+        above the ceiling — we only discard what we can positively place there.
         """
         if lat is None or lon is None:
+            return False
+        if alt_ft is not None and alt_ft > config.ADSB_BOX_CEILING_FT:
             return False
         if self._box_poly:
             poly = self._box_poly if strict else self._box_poly_out
@@ -465,7 +472,7 @@ class AdsbPoller:
             )
             track.history.append((now, track.home_dist_nm, track.alt_ft))
 
-        strict_in = self._inside_box(track.lat, track.lon, strict=True)
+        strict_in = self._inside_box(track.lat, track.lon, track.alt_ft, strict=True)
         track.classification = adsb_classify.classify(
             rep,
             in_box=strict_in,
@@ -529,9 +536,9 @@ class AdsbPoller:
             return []
         if track.in_box:
             # Only leaves once clear of the inflated boundary.
-            target = not self._inside_box(track.lat, track.lon, strict=False)
+            target = not self._inside_box(track.lat, track.lon, track.alt_ft, strict=False)
         else:
-            target = self._inside_box(track.lat, track.lon, strict=True)
+            target = self._inside_box(track.lat, track.lon, track.alt_ft, strict=True)
         want = (not track.in_box) if target else track.in_box
 
         if want == track.in_box:
