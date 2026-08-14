@@ -1,0 +1,57 @@
+{
+  "_comment": [
+    "ICAO 24-bit address ranges allocated to military operators. Used by",
+    "adsb_classify as a fallback when a feed record has no dbFlags — which is",
+    "common, because the community aircraft database only knows airframes",
+    "somebody has already identified.",
+    "",
+    "Ranges follow readsb/tar1090's is_mil_hex table. Start/end are inclusive",
+    "hex strings. Edit this file to tune; no code change needed.",
+    "",
+    "The 7CF800-7CFAFF ADF block is the one that matters here and is verified",
+    "against live traffic: 7cf839 C-130J A97-466, 7cf9d4 P-8A A47-010,",
+    "7cf9xx C-17 A41-211, 7cf8xx E-7A A30-002, 7cfafc EC135 N52-101."
+  ],
+  "blocks": [
+    {"start": "7CF800", "end": "7CFAFF", "country": "AU", "operator": "ADF"},
+    {"start": "7C822E", "end": "7C84FF", "country": "AU", "operator": "ADF"},
+    {"start": "7C8800", "end": "7C88FF", "country": "AU", "operator": "ADF"},
+    {"start": "7C9000", "end": "7C9FFF", "country": "AU", "operator": "ADF"},
+
+    {"start": "ADF7C8", "end": "AFFFFF", "country": "US", "operator": "US military"},
+
+    {"start": "43C000", "end": "43CFFF", "country": "GB", "operator": "UK military"},
+    {"start": "3EA000", "end": "3EBFFF", "country": "DE", "operator": "German military"},
+    {"start": "3F4000", "end": "3FBFFF", "country": "DE", "operator": "German military"},
+    {"start": "3A8000", "end": "3AFFFF", "country": "FR", "operator": "French military"},
+    {"start": "3B7000", "end": "3BFFFF", "country": "FR", "operator": "French military"},
+    {"start": "350000", "end": "37FFFF", "country": "ES", "operator": "Spanish military"},
+    {"start": "33FF00", "end": "33FFFF", "country": "IT", "operator": "Italian military"},
+
+    {"start": "76E000", "end": "76EFFF", "country": "SG", "operator": "RSAF"},
+    {"start": "738A00", "end": "738AFF", "country": "IL", "operator": "Israeli military"},
+    {"start": "70C070", "end": "70C07F", "country": "AF", "operator": "military"},
+    {"start": "710258", "end": "71028F", "country": "SA", "operator": "military"},
+    {"start": "710380", "end": "71039F", "country": "SA", "operator": "military"},
+
+    {"start": "0A4000", "end": "0A4FFF", "country": "DZ", "operator": "military"},
+    {"start": "010070", "end": "01008F", "country": "EG", "operator": "military"},
+    {"start": "444000", "end": "446FFF", "country": "BE", "operator": "military"},
+    {"start": "44F000", "end": "44FFFF", "country": "BE", "operator": "military"},
+    {"start": "457000", "end": "457FFF", "country": "BG", "operator": "military"},
+    {"start": "45F400", "end": "45F4FF", "country": "DK", "operator": "military"},
+    {"start": "468000", "end": "4683FF", "country": "GR", "operator": "military"},
+    {"start": "473C00", "end": "473C0F", "country": "HU", "operator": "military"},
+    {"start": "478100", "end": "4781FF", "country": "NO", "operator": "military"},
+    {"start": "480000", "end": "480FFF", "country": "NL", "operator": "military"},
+    {"start": "48D800", "end": "48D87F", "country": "PL", "operator": "military"},
+    {"start": "497C00", "end": "497CFF", "country": "PT", "operator": "military"},
+    {"start": "498420", "end": "49842F", "country": "PT", "operator": "military"},
+    {"start": "4B7000", "end": "4B7FFF", "country": "CH", "operator": "Swiss military"},
+    {"start": "4B8200", "end": "4B82FF", "country": "CH", "operator": "Swiss military"},
+    {"start": "506F32", "end": "506FFF", "country": "RU", "operator": "military"},
+    {"start": "800200", "end": "8002FF", "country": "IN", "operator": "military"},
+    {"start": "C0CDF9", "end": "C0CFFF", "country": "CA", "operator": "Canadian Forces"},
+    {"start": "E40000", "end": "E41FFF", "country": "BR", "operator": "military"}
+  ]
+}

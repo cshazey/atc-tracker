@@ -30,6 +30,7 @@ DISCORD_BOT_TOKEN=
 DISCORD_ALERTS_CHANNEL_ID=
 DISCORD_COMMANDS_CHANNEL_ID=
 DISCORD_CHANNEL_YBCG=
+DISCORD_CHANNEL_YBCG_TWR=
 DISCORD_CHANNEL_YSPT=
 DISCORD_CHANNEL_YBBN=
 ```
@@ -42,10 +43,15 @@ Discord is active once `DISCORD_BOT_TOKEN`, `DISCORD_ALERTS_CHANNEL_ID`, `DISCOR
 | Category | Channel | Feeds from | `.env` var |
 |---|---|---|---|
 | ctafs | `#ybcg-brisbane-center` | YBCG Brisbane Centre | `DISCORD_CHANNEL_YBCG` |
+| ctafs | `#ybcg-tower` | YBCG_TWR Gold Coast Ground/Tower | `DISCORD_CHANNEL_YBCG_TWR` |
 | ctafs | `#yspt-southport-ctaf` | YSPT Southport | `DISCORD_CHANNEL_YSPT` |
 | ctafs | `#ybbn-brisbane-center` | YBBN Brisbane Tower | `DISCORD_CHANNEL_YBBN` |
 | alerts | `#alerts` | Every station (emergency + interest matches) | `DISCORD_ALERTS_CHANNEL_ID` |
+| adsb | `#mil-tracker` | Live ADS-B: military + airshow display aircraft | `DISCORD_CHANNEL_MILITARY` |
+| adsb | `#gc-flights` | Live ADS-B: Gold Coast Airport arrivals/departures | `DISCORD_CHANNEL_FLIGHTS` |
 | admin | `#commands` (private) | — (control channel) | `DISCORD_COMMANDS_CHANNEL_ID` |
+
+The two `adsb` channels are optional — leave both blank and live aircraft tracking simply stays off. Set at least one to switch it on.
 
 ### `#ybcg-brisbane-center` / `#yspt-southport-ctaf` / `#ybbn-brisbane-center`
 **Purpose:** live transcript feed for that station only.
@@ -84,6 +90,31 @@ Outbound mentions are otherwise suppressed via `allowed_mentions`, so a transcri
 
 **Suggested channel topic:** `Alert mirror from every station — @here on emergencies only.`
 
+### `#mil-tracker` / `#gc-flights`
+**Purpose:** live ADS-B aircraft tracking, independent of the radio feeds. `#mil-tracker` carries military and airshow display aircraft; `#gc-flights` carries Gold Coast Airport movements.
+**Posts when:** an aircraft's transponder comes on or goes off, it enters or leaves the airshow display box, it departs from or is inbound to YBCG, or it squawks an emergency code. Emergencies also mirror to `#alerts` with `@here`.
+**Example:**
+> 📡 **Transponder on — TROJ23**
+> **ADF · TROJAN · C-130J-30**
+> 9,600 ft · 237 kt · 41 nm NW of YBCG
+> [Track on globe.adsbexchange.com](https://globe.adsbexchange.com/?icao=7cf839)
+> *Matched on: database flags it military · ADF hex block AU · callsign TROJ → TROJAN (HERCULES C130J-30, 37 SQN RICHMOND)*
+
+Each alert states why it fired. That is deliberate: if the classifier gets something wrong, the faulty rule is visible in the message rather than something to go looking for in the code.
+
+**The pinned board.** `#mil-tracker` also carries a single pinned message showing everything currently tracked, edited in place every 30 seconds — the same technique the per-station status messages use, for the same reason (Discord caps a channel at 50 pins). It is only re-sent when the rendered table actually changes, so a quiet night costs no traffic at all, and board refreshes are skipped entirely when the outbox is backing up: there will be another in 30 seconds, whereas a dropped event is gone.
+
+```
+CALLSIGN   TYPE     ALT   GS  DIST  BRG  NOTE
+WGTL11     E737  33,025  392    28  WNW  ADF · WEDGETAIL · 2 SQN WILLIAMTOWN
+AK4        P40    1,250  193    14   NW  probable display · warbird type P40
+T63        ?      1,225  242     8    N  IN BOX · unidentified in display box
+```
+
+**Attribution.** Aircraft data comes from [adsb.fi](https://adsb.fi) under personal, non-commercial terms that require attribution. It appears in the board description and every alert footer. Don't remove it.
+
+**Suggested channel topics:** `Live military & airshow aircraft over the Gold Coast. Data: adsb.fi` and `YBCG/OOL arrivals and departures. Data: adsb.fi`
+
 ### `#commands` (private)
 **Purpose:** bidirectional control, equivalent to the Telegram bot chat.
 **Commands:**
@@ -107,6 +138,15 @@ Outbound mentions are otherwise suppressed via `allowed_mentions`, so a transcri
 | `/military on\|off` | Toggle military callsign detection |
 | `/military refresh` | Re-scrape the ADF callsign list now |
 | `/military FALCON` | Look up one callsign's airframe, unit and ops frequency |
+| `/air` | Everything airborne in range, nearest first |
+| `/mil` | Military and airshow display aircraft only, with why each was flagged |
+| `/box` | Who is currently inside the airshow display box |
+| `/track <hex\|callsign\|rego>` | One aircraft in detail; falls back to a live lookup if it is out of range |
+| `/watch <hex\|callsign>` / `/unwatch` | Always alert on an aircraft, whatever the classifier thinks |
+| `/adsb` | ADS-B poller health: source, poll age, tracked counts, request failures, rate-limited alerts |
+| `/adsb on\|off` | Toggle live ADS-B tracking |
+
+> **`/mil` changed meaning.** It now shows what military traffic is airborne, which is what gets asked constantly during an event. The callsign register is `/military` (or `/callsign`), unchanged in every other respect.
 
 `/health` is the one to reach for mid-event: it tells you whether a quiet station is quiet because there's no traffic (`audio` recent, `last TX` old) or because the feed is dead (`audio` old, `reconnects` climbing).
 
