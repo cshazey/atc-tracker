@@ -622,6 +622,95 @@ else:
     check("every military/warbird type has a silhouette", _unmapped, [])
 
 
+# --- formation grouping ----------------------------------------------------
+
+section("Formation grouping")
+
+
+def frow(hex_, typ="PC21", lat=-28.0, lon=153.4, alt=1500, ident="", **kw):
+    """One board row, shaped like Track.as_dict, for the grouper."""
+    return {
+        "hex": hex_, "ident": ident, "reg": kw.get("reg", ""), "type": typ,
+        "desc": kw.get("desc", ""), "lat": lat, "lon": lon, "alt_ft": alt,
+        "gs_kt": kw.get("gs_kt", 200.0), "track_deg": kw.get("track_deg", 90.0),
+        "on_ground": False, "in_box": kw.get("in_box", False),
+        "military": kw.get("military", True), "probable": kw.get("probable", False),
+        "title": kw.get("title", ""), "reasons": kw.get("reasons", ""),
+        "squawk": kw.get("squawk", ""), "first_seen": kw.get("first_seen", 0.0),
+        "url": "",
+    }
+
+
+# Six Roulettes PC-21s in a tight display formation collapse to one contact.
+roul = [
+    frow(f"7cf9f{i}", typ="PC21", lat=-28.00 - i * 0.004, lon=153.40 + i * 0.004,
+         alt=1500, ident=f"RLTS{i + 1}")
+    for i in range(6)
+]
+g = T.group_formations(roul, radius_nm=12, alt_band_ft=5000, min_size=2)
+check("six PC-21s flying together make one group", len(g), 1)
+check("...of size six", g[0]["size"], 6)
+check("...flagged as a formation", g[0]["formation"], True)
+check("...labelled by the shared callsign stem", g[0]["label"], "RLTS")
+check("...carrying every aircraft", len(g[0]["members"]), 6)
+
+# Two KC-30As in company — the exact case that spammed sixteen messages.
+kc = [
+    frow("7cf865", typ="A332", lat=-28.10, lon=153.20, alt=9000, ident="THUMPER", reg="A39-005"),
+    frow("7cf868", typ="A332", lat=-28.12, lon=153.22, alt=9200, ident="A39-002", reg="A39-002"),
+]
+g = T.group_formations(kc, radius_nm=12, alt_band_ft=5000, min_size=2)
+check("two KC-30As in company make one group", len(g), 1)
+check("...of size two", g[0]["size"], 2)
+check("...falls back to the type when callsigns differ", g[0]["label"], "A332")
+
+# Same type, far apart — two separate transits, not a formation.
+far = [
+    frow("aaa001", typ="A332", lat=-28.10, lon=153.20, alt=9000),
+    frow("aaa002", typ="A332", lat=-28.60, lon=152.40, alt=9000),
+]
+g = T.group_formations(far, radius_nm=12, alt_band_ft=5000, min_size=2)
+check("same type far apart stays separate", len(g), 2)
+check("...and neither is a formation", any(x["formation"] for x in g), False)
+
+# Same type, close horizontally but in different altitude bands.
+split = [
+    frow("bbb001", typ="C130", lat=-28.000, lon=153.30, alt=1000),
+    frow("bbb002", typ="C130", lat=-28.005, lon=153.305, alt=15000),
+]
+g = T.group_formations(split, radius_nm=12, alt_band_ft=5000, min_size=2)
+check("a high transit and a low display of one type stay apart", len(g), 2)
+
+# Different types sitting together never merge.
+mixed = [
+    frow("ccc001", typ="PC21", lat=-28.000, lon=153.30, alt=1500, ident="RLTS1"),
+    frow("ccc002", typ="F35", lat=-28.001, lon=153.301, alt=1500, ident="ADDR1"),
+]
+g = T.group_formations(mixed, radius_nm=12, alt_band_ft=5000, min_size=2)
+check("different types nearby do not merge", len(g), 2)
+
+# radius 0 disables merging entirely — the ADSB_FORMATION_ENABLED=off path.
+g = T.group_formations(roul, radius_nm=0, alt_band_ft=5000, min_size=2)
+check("radius 0 disables merging", len(g), 6)
+check("...leaving all singletons", all(x["size"] == 1 for x in g), True)
+
+# A higher threshold keeps a pair as two individual contacts.
+g = T.group_formations(kc, radius_nm=12, alt_band_ft=5000, min_size=3)
+check("min_size 3 keeps a pair as two singletons", len(g), 2)
+check("...neither flagged a formation", any(x["formation"] for x in g), False)
+
+# A contact with no position is always its own singleton.
+g = T.group_formations(
+    [frow("ddd001", typ="PC21", lat=None, lon=None, alt=None, ident="RLTS1")],
+    radius_nm=12, alt_band_ft=5000, min_size=2,
+)
+check("a positionless contact is its own singleton", (len(g), g[0]["size"]), (1, 1))
+
+# Nearest group sorts first.
+g = T.group_formations(kc + far, radius_nm=12, alt_band_ft=5000, min_size=2)
+check("groups sort nearest-first", g[0]["dist_nm"] <= g[-1]["dist_nm"], True)
+
+
 # --- summary ---------------------------------------------------------------
 
 print()
