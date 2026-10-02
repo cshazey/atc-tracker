@@ -288,10 +288,10 @@ def classify(rep, *, in_box: bool = False, watch_hex=(), watch_callsign=()) -> C
     result = _classify_uncached(rep, in_box, watch_hex, watch_callsign)
 
     with _cache_lock:
-        # Crude bound. Identities are stable, so this only grows with distinct
-        # aircraft seen, but a long-running process still needs a ceiling.
-        if len(_classify_cache) > _CACHE_MAX:
-            _classify_cache.clear()
+        # Identities are stable, so this only grows with distinct aircraft
+        # seen. Evict the oldest entry rather than dropping the whole cache.
+        if len(_classify_cache) >= _CACHE_MAX:
+            _classify_cache.pop(next(iter(_classify_cache)))
         _classify_cache[key] = result
     return result
 

@@ -400,6 +400,9 @@ def edit_budget(length: int) -> int:
     return 3
 
 
+_TOKEN_CACHE_MAX = 5000
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -751,6 +754,9 @@ class Registry:
                 if dist < best_dist:
                     best, best_dist = (cand, conf, kind), dist
 
+        # Every distinct word ever heard lands here, so cap it for multi-day runs.
+        if len(self._token_cache) >= _TOKEN_CACHE_MAX:
+            self._token_cache.pop(next(iter(self._token_cache)), None)
         self._token_cache[token] = best
         return best
 
