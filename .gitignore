@@ -20,6 +20,8 @@ build/
 # Scraped callsign database — rebuilt from the seed + the live page.
 data/*.db
 data/*.db-journal
+data/*.db-wal
+data/*.db-shm
 
 # Timestamped .env backups — these contain real credentials.
 .env.backup-*

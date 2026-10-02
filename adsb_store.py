@@ -9,7 +9,7 @@ from "this process just started".
 
 Conventions follow military_callsigns.Registry: a connection per operation
 (SQLite is happy with that and it sidesteps cross-thread handle sharing), the
-schema applied on every connect via executescript, and upserts written as
+schema applied once per store on first connect, and upserts written as
 ON CONFLICT ... DO UPDATE.
 
 Two naming notes. The description column is ``descr`` because DESC is a SQL
@@ -79,11 +79,18 @@ class AdsbStore:
         self._last_seen: dict = {}
         self._alerts: dict = {}
         self._loaded = False
+        self._schema_ready = False
 
     def _connect(self) -> sqlite3.Connection:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self._schema_ready:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=15)
-        conn.executescript(_SCHEMA)
+        conn.execute("PRAGMA synchronous=NORMAL")
+        if not self._schema_ready:
+            # WAL lets the live map read while the poller writes every 10 s.
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.executescript(_SCHEMA)
+            self._schema_ready = True
         return conn
 
     def load(self) -> None:

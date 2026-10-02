@@ -941,9 +941,13 @@ def _is_prompt_echo(text: str, prompt: str) -> bool:
     text_grams = _ngrams(words)
     if not text_grams:
         return False
-    prompt_grams = _ngrams(_normalise_words(prompt))
-    overlap = len(text_grams & prompt_grams) / len(text_grams)
+    overlap = len(text_grams & _prompt_grams(prompt)) / len(text_grams)
     return overlap > PROMPT_ECHO_MAX_OVERLAP
+
+
+@functools.lru_cache(maxsize=32)
+def _prompt_grams(prompt: str) -> frozenset:
+    return frozenset(_ngrams(_normalise_words(prompt)))
 
 
 def _is_hallucination(text: str, prompt: str = "") -> bool:
@@ -1002,8 +1006,14 @@ def _kw_pattern(kw: str) -> re.Pattern:
     return re.compile(r"\b" + re.escape(kw) + r"\b", re.IGNORECASE)
 
 
+@functools.lru_cache(maxsize=8)
+def _kw_union(keywords: tuple) -> re.Pattern:
+    alternatives = "|".join(re.escape(kw) for kw in sorted(keywords, key=len, reverse=True))
+    return re.compile(r"\b(?:" + alternatives + r")\b", re.IGNORECASE)
+
+
 def _has_keywords(text: str, keywords: list) -> bool:
-    return any(_kw_pattern(kw).search(text) for kw in keywords)
+    return bool(keywords) and _kw_union(tuple(keywords)).search(text) is not None
 
 
 def _matched_keywords(text: str, keywords: list) -> list[str]:
@@ -1046,9 +1056,12 @@ def _military_summary(matches: list, strong_only: bool = False) -> str:
     return " · ".join(m.describe() for m in picked)
 
 
+_ATC_CORRECTIONS = [(re.compile(p, re.IGNORECASE), r) for p, r in ATC_CORRECTIONS]
+
+
 def _apply_atc_corrections(text: str) -> str:
-    for pattern, replacement in ATC_CORRECTIONS:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    for pattern, replacement in _ATC_CORRECTIONS:
+        text = pattern.sub(replacement, text)
     return text
 
 
@@ -1088,11 +1101,46 @@ def _highlight_keywords(text: str, keywords: list, enabled: bool) -> Text:
 # Telegram helpers
 # ---------------------------------------------------------------------------
 
+# One pooled session for Discord and Telegram: keep-alive skips a TLS handshake
+# on every post.
+_http = requests.Session()
+
+# Telegram is sent from its own thread so a slow API never stalls the
+# transcriber or the ADS-B poller, which both used to block on it.
+_telegram_queue: queue.Queue = queue.Queue(maxsize=100)
+_telegram_thread: Optional[threading.Thread] = None
+_telegram_thread_lock = threading.Lock()
+
+
+def _telegram_worker() -> None:
+    while True:
+        message = _telegram_queue.get()
+        try:
+            _send_telegram_now(message)
+        finally:
+            _telegram_queue.task_done()
+
+
 def _post_telegram(message: str) -> None:
+    global _telegram_thread
     if not config.TELEGRAM_ENABLED or not _telegram_active:
         return
+    with _telegram_thread_lock:
+        if _telegram_thread is None:
+            _telegram_thread = threading.Thread(
+                target=_telegram_worker, daemon=True, name="telegram-outbox"
+            )
+            _telegram_thread.start()
     try:
-        requests.post(
+        _telegram_queue.put_nowait(message)
+    except queue.Full:
+        if _display_ref is not None:
+            _display_ref.log(Text("⚠ Telegram outbox full, dropping message", style="dim yellow"))
+
+
+def _send_telegram_now(message: str) -> None:
+    try:
+        _http.post(
             f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": config.TELEGRAM_CHAT_ID,
@@ -1259,7 +1307,7 @@ def _discord_payload(
 def _discord_request(method: str, url: str, payload: dict, what: str) -> Optional[dict]:
     headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
     try:
-        resp = requests.request(method, url, json=payload, headers=headers, timeout=10)
+        resp = _http.request(method, url, json=payload, headers=headers, timeout=10)
         if resp.status_code == 429:
             retry_after = 1.0
             try:
@@ -1267,7 +1315,7 @@ def _discord_request(method: str, url: str, payload: dict, what: str) -> Optiona
             except Exception:
                 pass
             time.sleep(min(retry_after, 5.0) + 0.05)
-            resp = requests.request(method, url, json=payload, headers=headers, timeout=10)
+            resp = _http.request(method, url, json=payload, headers=headers, timeout=10)
         if resp.status_code >= 400:
             if _display_ref is not None:
                 _display_ref.log(Text(
@@ -1342,7 +1390,7 @@ def _pin_discord(channel_id: str, message_id: str) -> None:
         return
     headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
     try:
-        resp = requests.put(
+        resp = _http.put(
             f"{_DISCORD_API}/channels/{channel_id}/pins/{message_id}",
             headers=headers, timeout=10,
         )
@@ -1820,7 +1868,7 @@ class _AdsbLiveCards:
             alt_band_ft=config.ADSB_FORMATION_ALT_BAND_FT,
             min_size=config.ADSB_FORMATION_MIN,
         )
-        busy = _discord_outbox is not None and _discord_outbox.depth() > 40
+        busy = _discord_outbox is not None and _discord_outbox.depth > 40
 
         matched = set()
         # New cards open with a blocking POST (to capture the message id), so
@@ -1992,7 +2040,7 @@ def _broadcast_adsb_board(board: dict) -> None:
             if _display_ref is not None:
                 _display_ref.log(Text(f"⚠ ADS-B live cards failed: {exc}", style="dim yellow"))
 
-    if _discord_outbox is not None and _discord_outbox.depth() > 50:
+    if _discord_outbox is not None and _discord_outbox.depth > 50:
         return
 
     body = _render_adsb_board(board)
