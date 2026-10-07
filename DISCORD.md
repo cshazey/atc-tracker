@@ -47,11 +47,12 @@ Discord is active once `DISCORD_BOT_TOKEN`, `DISCORD_ALERTS_CHANNEL_ID`, `DISCOR
 | ctafs | `#yspt-southport-ctaf` | YSPT Southport | `DISCORD_CHANNEL_YSPT` |
 | ctafs | `#ybbn-brisbane-center` | YBBN Brisbane Tower | `DISCORD_CHANNEL_YBBN` |
 | alerts | `#alerts` | Every station (emergency + interest matches) | `DISCORD_ALERTS_CHANNEL_ID` |
-| adsb | `#mil-tracker` | Live ADS-B: military + airshow display aircraft | `DISCORD_CHANNEL_MILITARY` |
+| adsb | `#mil-tracker` | Live ADS-B: military + notable aircraft | `DISCORD_CHANNEL_MILITARY` |
 | adsb | `#gc-flights` | Live ADS-B: Gold Coast Airport arrivals/departures | `DISCORD_CHANNEL_FLIGHTS` |
+| adsb | `#airspace-watch` | Radio callsign flags, zone entries, predicted entries, zone board, daily digest | `DISCORD_CHANNEL_AIRSPACE` |
 | admin | `#commands` (private) | — (control channel) | `DISCORD_COMMANDS_CHANNEL_ID` |
 
-The two `adsb` channels are optional — leave both blank and live aircraft tracking simply stays off. Set at least one to switch it on.
+The `adsb` channels are optional. `#airspace-watch` falls back to `#alerts` when its ID is blank, so zone and radio flags always have somewhere to go; leave `#mil-tracker` and `#gc-flights` blank and those feeds simply stay off.
 
 ### `#ybcg-brisbane-center` / `#yspt-southport-ctaf` / `#ybbn-brisbane-center`
 **Purpose:** live transcript feed for that station only.
@@ -80,19 +81,19 @@ Connection status uses **one pinned message per channel, created at startup and 
 | Tier | Matches | Behaviour |
 |---|---|---|
 | 🚨 Emergency | MAYDAY, PAN PAN, EMERGENCY, squawk 7700/7600/7500, GUARD | Red embed **and an `@here` ping** naming the matched term |
-| 🔴 Interest | Display and military callsigns (HORNET, ROULETTES, F-35, WARBIRD, FORMATION…), RESTRICTED, COASTAL | Orange embed, **no ping** |
+| 🔴 Interest | Military callsigns and types (HORNET, ROULETTES, F-35, WARBIRD, FORMATION…), RESTRICTED, COASTAL | Orange embed, **no ping** |
 
 **Posts when:** any station's transmission matches — mirrors the same transmission that also posted to its own station channel.
 
-Only the emergency tier pings, deliberately: an airshow weekend generates a constant stream of interest-tier matches, and pinging on all of them would train everyone to ignore the channel. Bare numeric keywords (`"18"`, `"500"`) were removed for the same reason — they fired on every "runway 18" and "500 feet".
+Only the emergency tier pings, deliberately: a busy day generates a constant stream of interest-tier matches, and pinging on all of them would train everyone to ignore the channel. Bare numeric keywords (`"18"`, `"500"`) were removed for the same reason — they fired on every "runway 18" and "500 feet".
 
 Outbound mentions are otherwise suppressed via `allowed_mentions`, so a transcript that happens to contain "@everyone" cannot ping the server.
 
 **Suggested channel topic:** `Alert mirror from every station — @here on emergencies only.`
 
 ### `#mil-tracker` / `#gc-flights`
-**Purpose:** live ADS-B aircraft tracking, independent of the radio feeds. `#mil-tracker` carries military and airshow display aircraft; `#gc-flights` carries Gold Coast Airport movements.
-**Posts when:** an aircraft's transponder comes on or goes off, it enters or leaves the airshow display box, it departs from or is inbound to YBCG, or it squawks an emergency code. Emergencies also mirror to `#alerts` with `@here`.
+**Purpose:** live ADS-B aircraft tracking, independent of the radio feeds. `#mil-tracker` carries military, probable-military and notable aircraft; `#gc-flights` carries Gold Coast Airport movements.
+**Posts when:** an aircraft's transponder comes on or goes off, it departs from or is inbound to YBCG, or it squawks an emergency code. Emergencies also mirror to `#alerts` with `@here`. Zone entries go to `#airspace-watch`.
 **Example:**
 > 📡 **Transponder on — TROJ23**
 > **ADF · TROJAN · C-130J-30**
@@ -107,13 +108,35 @@ Each alert states why it fired. That is deliberate: if the classifier gets somet
 ```
 CALLSIGN   TYPE     ALT   GS  DIST  BRG  NOTE
 WGTL11     E737  33,025  392    28  WNW  ADF · WEDGETAIL · 2 SQN WILLIAMTOWN
-AK4        P40    1,250  193    14   NW  probable display · warbird type P40
-T63        ?      1,225  242     8    N  IN BOX · unidentified in display box
+AK4        P40    1,250  193    14   NW  IN Gold Coast coastal corridor · warbird type P40
 ```
 
 **Attribution.** Aircraft data comes from [adsb.fi](https://adsb.fi) under personal, non-commercial terms that require attribution. It appears in the board description and every alert footer. Don't remove it.
 
-**Suggested channel topics:** `Live military & airshow aircraft over the Gold Coast. Data: adsb.fi` and `YBCG/OOL arrivals and departures. Data: adsb.fi`
+**Suggested channel topics:** `Live military & notable aircraft over the Gold Coast. Data: adsb.fi` and `YBCG/OOL arrivals and departures. Data: adsb.fi`
+
+### `#airspace-watch`
+**Purpose:** the one place the radio and the ADS-B picture meet. Falls back to `#alerts` if `DISCORD_CHANNEL_AIRSPACE` is blank. Needs **Attach Files** as well as the usual Send Messages / Embed Links, and **Manage Messages** to pin the zone board.
+
+**Posts when:**
+- 📻 a **radio callsign is flagged** — a strong military callsign, any callsign in an alert-tier transmission, or a callsign matched to an aircraft that is military, probable, watchlisted, emergency-services, notable or squawking an emergency. The embed quotes the transcript, names the matched aircraft with its position, zones and roles, and attaches the audio clip.
+- 🎯 an aircraft **enters a zone** whose triggers include one of its roles (and ↗️ leaves it, for interest-level zones).
+- ⏱️ a flagged aircraft is **projected to enter** a zone within 5 minutes.
+- 🗞️ the **daily digest** at `DIGEST_TIME` (21:00 by default).
+
+**Example:**
+> 📻 **WOLF21 — YBCG_TWR Gold Coast Tower**
+> > Gold Coast Tower, Wolf two one, five miles south, inbound for the overhead
+> **🎖️ WOLF21** — Military callsign
+> Tracked: **WOLF21** · F18 · 3,200 ft · 280 kt · 6 nm S of YBCG
+> 🛡️ In Gold Coast CTR, Gold Coast area (30 nm)
+> *📎 YBCG_TWR_141502.wav*
+
+**The zone board.** A single pinned *Airspace watch* message lists every enabled zone with who flagged is inside it and who is inbound, edited in place only when it changes.
+
+Repeats are held back: each zone event has a 15-minute cooldown per aircraft and zone, a radio callsign is flagged at most once per 5 minutes per station, and zone traffic has its own 8/min rate limit so it cannot starve the other channels. Zone shapes are approximate — see `data/airspace_zones.json`.
+
+**Suggested channel topic:** `Radio callsigns × live ADS-B over the Gold Coast. Zones approximate, not for navigation. Data: adsb.fi`
 
 ### `#commands` (private)
 **Purpose:** bidirectional control, equivalent to the Telegram bot chat.
@@ -139,8 +162,12 @@ T63        ?      1,225  242     8    N  IN BOX · unidentified in display box
 | `/military refresh` | Re-scrape the ADF callsign list now |
 | `/military FALCON` | Look up one callsign's airframe, unit and ops frequency |
 | `/air` | Everything airborne in range, nearest first |
-| `/mil` | Military and airshow display aircraft only, with why each was flagged |
-| `/box` | Who is currently inside the airshow display box |
+| `/mil` | Military and probable military aircraft only, with why each was flagged |
+| `/zones` | Every airspace zone, who is in it, who is inbound |
+| `/zone <id>` / `/zone on\|off <id>` | Aircraft inside one zone / enable or disable it |
+| `/predict on\|off` | Predicted-entry alerts |
+| `/heard <callsign>` | Recent radio mentions of a callsign and what they matched |
+| `/digest` | Post the daily digest now |
 | `/track <hex\|callsign\|rego>` | One aircraft in detail; falls back to a live lookup if it is out of range |
 | `/watch <hex\|callsign>` / `/unwatch` | Always alert on an aircraft, whatever the classifier thinks |
 | `/adsb` | ADS-B poller health: source, poll age, tracked counts, request failures, rate-limited alerts |

@@ -1,7 +1,7 @@
 """Read-only web dashboard for the live ADS-B picture.
 
-A single page plus three JSON endpoints, served from the poller's in-memory
-track store by the standard library's HTTP server. No new dependencies: this
+A single page plus a handful of JSON endpoints, served from the poller's
+in-memory track store by the standard library's HTTP server. No new dependencies: this
 project runs on requests and stdlib, and adding a web framework to draw one map
 would be out of proportion.
 
@@ -58,10 +58,26 @@ _PAGE = """<!doctype html>
         padding:7px 9px; margin-bottom:6px; background:#161b23; }
   .ac.mil { border-left-color:#e67e22; }
   .ac.prob { border-left-color:#8b98a8; }
-  .ac.box { border-left-color:#e74c3c; background:#1d1618; }
+  .ac.spec { border-left-color:#3498db; }
+  .ac.watch { border-left-color:#ff2d95; }
+  .ac.emg { border-left-color:#ff3b30; background:#1d1618; }
+  .ac.zone { background:#1d1618; }
+  .ac { cursor:pointer; }
   .ac .cs { font-weight:600; }
   .ac .meta { color:#8b98a8; font-size:12px; }
   .ac .why { color:#6f7d8d; font-size:11px; margin-top:3px; }
+  .ac .heard { color:#9fd0ff; font-size:11px; margin-top:3px; }
+  .zn { border:1px solid #232a34; border-radius:6px; padding:6px 9px; margin-bottom:6px;
+        background:#141a22; border-left:3px solid var(--c); }
+  .zn .nm { font-weight:600; } .zn .al { color:#6f7d8d; font-size:11px; float:right; }
+  .zn .oc { font-size:12px; color:#dbe5ef; margin-top:3px; }
+  .zn .in { font-size:12px; color:#f1c40f; }
+  .zn .clr { font-size:12px; color:#6f7d8d; font-style:italic; }
+  .tag { display:inline-block; font-size:10px; padding:0 4px; border-radius:3px;
+         background:#2a3340; color:#cdd9e5; margin-left:3px; }
+  .chip { display:inline-block; font-size:11px; padding:0 5px; border-radius:3px;
+          background:#1f3a55; color:#9fd0ff; margin:2px 3px 0 0; cursor:default; }
+  .chip.ln { background:#3a2a55; color:#d5b8ff; cursor:pointer; }
   .empty { color:#6f7d8d; font-style:italic; font-size:13px; }
   a { color:#58a6ff; }
   footer { margin-top:22px; padding-top:12px; border-top:1px solid #232a34;
@@ -90,12 +106,14 @@ _PAGE = """<!doctype html>
 <div id="side">
   <h1>Gold Coast air picture</h1>
   <div class="sub" id="status">connecting…</div>
+  <h2>Airspace watch</h2><div id="zones"><div class="empty">Loading zones…</div></div>
+  <h2>Watch feed</h2><div id="watch"><div class="empty">Nothing flagged yet.</div></div>
   <h2>Latest ATC</h2><div id="notes"><div class="empty">Listening…</div></div>
-  <h2>Military &amp; display</h2><div id="mil"></div>
-  <h2>Display box</h2><div id="box"></div>
+  <h2>Military &amp; notable</h2><div id="mil"></div>
   <h2>All airborne</h2><div id="all"></div>
   <h2>Recent activity</h2><div id="events"><div class="empty">Nothing yet.</div></div>
   <footer>
+    Zone shapes are approximate and not for navigation.<br>
     Data from <a href="https://adsb.fi" target="_blank" rel="noopener">adsb.fi</a>,
     used under their personal non-commercial terms.<br>
     Aircraft detail on <a href="https://globe.adsbexchange.com/" target="_blank"
@@ -111,10 +129,26 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; OpenStreetMap, &copy; CARTO', maxZoom: 18
 }).addTo(map);
 
-// The airshow display box.
-const BOX = __BOX__;
-L.polygon(BOX, {color:'#e74c3c', weight:1.5, fillOpacity:0.07,
-  dashArray:'5,5'}).addTo(map).bindTooltip('Airshow display box');
+// Watched airspace zones, redrawn when one is toggled on or off.
+const zoneLayer = L.layerGroup().addTo(map);
+let zoneSig = '';
+async function loadZones() {
+  try {
+    const r = await fetch(q('/api/zones'));
+    if (!r.ok) return;
+    const zones = await r.json();
+    const sig = JSON.stringify(zones.map(z => [z.id, z.enabled]));
+    if (sig === zoneSig) return;
+    zoneSig = sig;
+    zoneLayer.clearLayers();
+    for (const z of zones) {
+      if (!z.enabled) continue;
+      L.polygon(z.outline, {color: z.color, weight: 1.5, fillOpacity: 0.06,
+        dashArray: z.kind === 'ring' ? '2,6' : '5,5'})
+        .addTo(zoneLayer).bindTooltip(`${esc(z.name)} · ${esc(z.alt)}`);
+    }
+  } catch (e) {}
+}
 L.circleMarker([__LAT__, __LON__], {radius:5, color:'#58a6ff', fillOpacity:1})
   .addTo(map).bindTooltip('__ICAO__');
 
@@ -157,14 +191,30 @@ function svgIcon(a, colour) {
 
 let markers = {};
 let trails = {};
+let vectors = {};
+const ROLE_COLOUR = {emergency:'#ff3b30', watch:'#ff2d95', military:'#e67e22',
+  special:'#3498db', probable:'#c9d1d9', notable:'#b48ead', anon_fast:'#f1c40f'};
+const ROLE_ORDER = ['emergency','watch','military','special','probable','notable','anon_fast'];
+function topRole(a) {
+  const roles = a.roles || [];
+  return ROLE_ORDER.find(r => roles.includes(r)) || '';
+}
 function colourFor(a) {
-  return a.in_box ? '#e74c3c' : (a.military ? '#e67e22'
-       : (a.probable ? '#c9d1d9' : '#4d94d6'));
+  return ROLE_COLOUR[topRole(a)] || '#4d94d6';
 }
 function trailStyle(a) {
+  const flagged = !!topRole(a);
   return {color: colourFor(a),
-          weight: (a.in_box || a.military) ? 2.5 : 1.5,
-          opacity: a.in_box ? 0.85 : (a.military ? 0.6 : 0.3)};
+          weight: flagged ? (a.in_zone ? 3 : 2.5) : 1.5,
+          opacity: flagged ? (a.in_zone ? 0.9 : 0.6) : 0.3};
+}
+// Dead-reckoned 3-minute vector for flagged aircraft — the same straight-line
+// projection the tracker uses for its predicted-entry alerts.
+function vectorFor(a) {
+  if (!topRole(a) || !a.gs_kt || a.gs_kt < 60 || a.track_deg == null || a.on_ground) return null;
+  const d = a.gs_kt * 3 / 60, t = a.track_deg * Math.PI / 180;
+  return [[a.lat, a.lon], [a.lat + d * Math.cos(t) / 60,
+          a.lon + d * Math.sin(t) / (60 * Math.cos(a.lat * Math.PI / 180))]];
 }
 function esc(s) {
   return (s == null ? '' : String(s)).replace(/[&<>"]/g,
@@ -195,28 +245,65 @@ let lastAircraft = [];
 function refreshIcons() {
   for (const a of lastAircraft) if (markers[a.hex]) markers[a.hex].setIcon(icon(a));
 }
+function name(a) { return a.ident || a.reg || a.hex.toUpperCase(); }
 function label(a) {
   const alt = a.on_ground ? 'on the ground'
             : (a.alt_ft != null ? a.alt_ft.toLocaleString() + ' ft' : '? ft');
-  return `<b>${a.ident || a.reg || a.hex.toUpperCase()}</b><br>`
-       + `${a.desc || a.type || 'unidentified'}<br>${alt}`
+  const h = a.heard;
+  return `<b>${esc(name(a))}</b><br>`
+       + `${esc(a.desc || a.type || 'unidentified')}<br>${alt}`
        + (a.gs_kt ? ` &middot; ${Math.round(a.gs_kt)} kt` : '')
-       + (a.reasons ? `<br><i>${a.reasons}</i>` : '')
-       + `<br><a href="${a.url}" target="_blank" rel="noopener">globe.adsbexchange.com</a>`;
+       + ((a.zone_names || []).length ? `<br>🛡 In ${esc(a.zone_names.join(', '))}` : '')
+       + ((a.roles || []).length ? `<br>${esc(a.roles.join(' · '))}` : '')
+       + (a.reasons ? `<br><i>${esc(a.reasons)}</i>` : '')
+       + (h ? `<br>📻 ${esc(h.icao)} ${fmtTime(h.at)}: “${esc(h.text)}”` : '')
+       + `<br><a href="${esc(a.url)}" target="_blank" rel="noopener">globe.adsbexchange.com</a>`;
 }
 function card(a) {
-  const cls = a.in_box ? 'box' : (a.military ? 'mil' : (a.probable ? 'prob' : ''));
+  const role = topRole(a);
+  const cls = {emergency:'emg', watch:'watch', military:'mil', special:'spec',
+               probable:'prob'}[role] || '';
   const alt = a.on_ground ? 'ground'
             : (a.alt_ft != null ? a.alt_ft.toLocaleString() + ' ft' : '?');
   const dist = a.dist_nm != null ? `${a.dist_nm.toFixed(0)} nm` : '';
-  return `<div class="ac ${cls}"><span class="cs">${a.ident || a.reg || a.hex.toUpperCase()}</span>
-    <span class="meta"> ${a.type || '?'} &middot; ${alt}
+  const zones = (a.zone_names || []).map(z => `<span class="tag">${esc(z)}</span>`).join('');
+  const h = a.heard;
+  return `<div class="ac ${cls} ${a.in_zone && role ? 'zone' : ''}" data-hex="${esc(a.hex)}">`
+    + `<span class="cs">${esc(name(a))}</span>${zones}
+    <span class="meta"> ${esc(a.type || '?')} &middot; ${alt}
     ${a.gs_kt ? '&middot; ' + Math.round(a.gs_kt) + ' kt' : ''} ${dist ? '&middot; ' + dist : ''}</span>
-    ${a.reasons ? `<div class="why">${a.reasons}</div>` : ''}</div>`;
+    ${a.reasons ? `<div class="why">${esc(a.reasons)}</div>` : ''}
+    ${h ? `<div class="heard">📻 ${esc(h.icao)} ${fmtTime(h.at)}: ${esc(h.text)}</div>` : ''}</div>`;
 }
+function focus(hex) {
+  const m = markers[hex];
+  if (!m) return;
+  map.setView(m.getLatLng(), Math.max(map.getZoom(), 11));
+  m.openPopup();
+}
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-hex]');
+  if (el && el.dataset.hex) focus(el.dataset.hex);
+});
 function fill(id, rows, empty) {
   document.getElementById(id).innerHTML = rows.length
     ? rows.map(card).join('') : `<div class="empty">${empty}</div>`;
+}
+function fillZones(zones) {
+  const el = document.getElementById('zones');
+  if (!zones.length) { el.innerHTML = '<div class="empty">No zones enabled.</div>'; return; }
+  el.innerHTML = zones.map(z => {
+    const occ = z.occupants.map(a =>
+      `<span class="chip ln" data-hex="${esc(a.hex)}">${esc(name(a))}`
+      + ` <small>${esc(topRole(a))}</small></span>`).join('');
+    const inc = z.incoming.map(i =>
+      `<div class="in" data-hex="${esc(i.hex)}">↘ ${esc(i.label)} inbound ~`
+      + `${Math.max(1, Math.round((i.eta_sec || 0) / 60))} min</div>`).join('');
+    return `<div class="zn" style="--c:${esc(z.color)}"><span class="al">${esc(z.alt)}`
+      + ` · ${z.count} ac</span><span class="nm">${esc(z.name)}</span>`
+      + (occ || inc ? `<div class="oc">${occ}</div>${inc}` : '<div class="clr">clear</div>')
+      + `</div>`;
+  }).join('');
 }
 async function tick() {
   try {
@@ -244,26 +331,36 @@ async function tick() {
       } else if (trails[a.hex]) {
         map.removeLayer(trails[a.hex]); delete trails[a.hex];
       }
+      const vec = vectorFor(a);
+      if (vec) {
+        const st = {color: colourFor(a), weight: 1.5, opacity: 0.8, dashArray: '3,5'};
+        if (vectors[a.hex]) vectors[a.hex].setLatLngs(vec).setStyle(st);
+        else vectors[a.hex] = L.polyline(vec, st).addTo(map);
+      } else if (vectors[a.hex]) {
+        map.removeLayer(vectors[a.hex]); delete vectors[a.hex];
+      }
     }
     for (const hex of Object.keys(markers)) {
       if (!seen.has(hex)) {
         map.removeLayer(markers[hex]); delete markers[hex];
         if (trails[hex]) { map.removeLayer(trails[hex]); delete trails[hex]; }
+        if (vectors[hex]) { map.removeLayer(vectors[hex]); delete vectors[hex]; }
       }
     }
     fill('mil', d.military, 'Nothing military or unusual in range.');
-    fill('box', d.box, 'The display box is empty.');
+    fillZones(d.zones || []);
     fill('all', d.all, 'Nothing airborne in range.');
     document.getElementById('status').textContent =
       `${d.tracks} aircraft in range · ${d.military.length} military · `
-      + `${d.box.length} in the box · ${d.source} · `
+      + `${(d.zoned || []).length} flagged in zones · ${d.source} · `
       + new Date().toLocaleTimeString('en-AU');
   } catch (e) {
     document.getElementById('status').textContent = 'lost contact with the tracker: ' + e.message;
   }
 }
-const EV_ICON = {appeared:'📡', disappeared:'🔇', box_enter:'🎯', box_exit:'↗️',
-  departure:'🛫', inbound:'🛬', landed:'🛬', emergency:'🚨', position:'🎯'};
+const EV_ICON = {appeared:'📡', disappeared:'🔇', zone_enter:'🎯', zone_exit:'↗️',
+  zone_predict:'⏱️', departure:'🛫', inbound:'🛬', landed:'🛬', emergency:'🚨',
+  position:'🎯', radio:'📻'};
 
 async function tickNotes() {
   try {
@@ -276,10 +373,28 @@ async function tickNotes() {
       const cls = n.tier >= 2 ? 'emg' : (n.tier >= 1 ? 'int' : '');
       const mil = (n.military && n.military.length)
         ? `<span class="mil">🎖 ${esc(n.military.join(', '))}</span>` : '';
+      const chips = (n.callsigns || []).map(c => c.hex
+        ? `<span class="chip ln" data-hex="${esc(c.hex)}" title="show on map">${esc(c.callsign)} → ✈</span>`
+        : `<span class="chip">${esc(c.callsign)}</span>`).join('');
       return `<div class="note ${cls}"><span class="tm">${fmtTime(n.at)}</span>`
         + `<span class="st">${esc(n.icao)}</span>${mil}`
-        + `<span class="tx">${esc(n.text)}</span></div>`;
+        + `<span class="tx">${esc(n.text)}</span>${chips}</div>`;
     }).join('');
+  } catch (e) {}
+}
+
+async function tickWatch() {
+  try {
+    const r = await fetch(q('/api/watch'));
+    if (!r.ok) return;
+    const items = await r.json();
+    const el = document.getElementById('watch');
+    if (!items.length) { el.innerHTML = '<div class="empty">Nothing flagged yet.</div>'; return; }
+    el.innerHTML = items.slice(0, 20).map(e =>
+      `<div class="ev" ${e.hex ? `data-hex="${esc(e.hex)}" style="cursor:pointer"` : ''}>`
+      + `<span class="tm">${fmtTime(e.at)}</span> ${EV_ICON[e.kind] || '✈️'} `
+      + `<b>${esc(e.title)}</b> ${esc(e.detail)}</div>`
+    ).join('');
   } catch (e) {}
 }
 
@@ -298,6 +413,8 @@ async function tickEvents() {
 }
 
 tick(); setInterval(tick, 5000);
+loadZones(); setInterval(loadZones, 60000);
+tickWatch(); setInterval(tickWatch, 8000);
 tickNotes(); setInterval(tickNotes, 7000);
 tickEvents(); setInterval(tickEvents, 9000);
 </script>
@@ -307,19 +424,10 @@ tickEvents(); setInterval(tickEvents, 9000);
 
 
 def _render_page() -> bytes:
-    if config.ADSB_BOX_POLY:
-        poly = list(config.ADSB_BOX_POLY)
-    else:
-        lat_min, lat_max, lon_min, lon_max = config.ADSB_BOX
-        poly = [
-            (lat_min, lon_min), (lat_min, lon_max),
-            (lat_max, lon_max), (lat_max, lon_min),
-        ]
     return (
         _PAGE.replace("__LAT__", f"{config.ADSB_HOME_LAT}")
         .replace("__LON__", f"{config.ADSB_HOME_LON}")
         .replace("__ICAO__", config.ADSB_HOME_ICAO)
-        .replace("__BOX__", json.dumps([[a, b] for a, b in poly]))
         .replace("__MARKERV__", _marker_version())
     ).encode("utf-8")
 
@@ -419,6 +527,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
         elif path == "/api/events":
             self._json(self._events())
+        elif path == "/api/zones":
+            self._json(self._zones())
+        elif path == "/api/watch":
+            self._json(self._watch())
         elif path == "/api/notes":
             self._json(self._notes())
         elif path == "/api/health":
@@ -440,16 +552,52 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _board(self) -> dict:
         if self.poller is None:
-            return {"all": [], "military": [], "box": [], "tracks": 0, "source": "-"}
+            return {"all": [], "military": [], "zones": [], "zoned": [], "tracks": 0, "source": "-"}
         board = self.poller.snapshot_board()
         return {
             "at": board["at"],
             "all": board["all"],
             "military": board["military"],
-            "box": board["box"],
+            "zones": board["zones"],
+            "zoned": board["zoned"],
             "tracks": board["tracks"],
             "source": board["source"],
         }
+
+    def _zones(self) -> list:
+        if self.poller is None:
+            return []
+        zs = self.poller.zones
+        return [dict(z.as_dict(), enabled=zs.is_enabled(z)) for z in zs.all()]
+
+    def _watch(self) -> list:
+        """Zone events, emergencies and flagged radio callsigns, newest first."""
+        if self.poller is None or self.poller.store is None:
+            return []
+        store = self.poller.store
+        names = self.poller.zone_names()
+        items = [
+            {
+                "at": e["at"], "kind": e["kind"], "hex": e["hex"],
+                "title": f"{e['ident'] or e['hex'].upper()}"
+                + (f" · {names.get(e['zone'], e['zone'])}" if e.get("zone") else ""),
+                "detail": e["detail"],
+            }
+            for e in store.recent_events(80)
+            if e["kind"] in ("zone_enter", "zone_exit", "zone_predict", "emergency")
+        ]
+        items += [
+            {
+                "at": m["at"], "kind": "radio", "hex": m["hex"],
+                "title": f"{m['callsign']} on {m['icao']}"
+                + (f" → {m['ident']}" if m["ident"] else ""),
+                "detail": m["text"][:160],
+            }
+            for m in store.recent_mentions(80)
+            if m["flagged"]
+        ]
+        items.sort(key=lambda x: -x["at"])
+        return items[:40]
 
     def _events(self) -> list:
         if self.poller is None or self.poller.store is None:

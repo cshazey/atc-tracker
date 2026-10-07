@@ -167,6 +167,36 @@ def bbox_to_polygon(bbox: Sequence[float]) -> list[tuple[float, float]]:
     ]
 
 
+def distance_to_polygon_nm(lat: float, lon: float, poly: Sequence[Sequence[float]]) -> float:
+    """Shortest distance from a point to a polygon's boundary, in NM.
+
+    A true offset, unlike inflate_polygon: a long thin corridor gets the same
+    dead band along its sides as at its ends. Uses a local flat projection
+    centred on the point, which is exact enough over a few miles.
+    """
+    if len(poly) < 2:
+        return float("inf")
+    kx = nm_per_deg_lon(lat)
+    pts = [((p[1] - lon) * kx, (p[0] - lat) * NM_PER_DEG_LAT) for p in poly]
+    best = float("inf")
+    for i in range(len(pts)):
+        ax, ay = pts[i]
+        bx, by = pts[(i + 1) % len(pts)]
+        dx, dy = bx - ax, by - ay
+        seg = dx * dx + dy * dy
+        t = 0.0 if seg == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / seg))
+        cx, cy = ax + t * dx, ay + t * dy
+        best = min(best, math.hypot(cx, cy))
+    return best
+
+
+def circle_polygon(
+    lat: float, lon: float, radius_nm: float, points: int = 48
+) -> list[tuple[float, float]]:
+    """A circle as a polygon, for drawing."""
+    return [destination_point(lat, lon, 360.0 * i / points, radius_nm) for i in range(points)]
+
+
 # --- motion ----------------------------------------------------------------
 
 

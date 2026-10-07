@@ -43,11 +43,14 @@ from rich.panel import Panel
 from rich.text import Text
 
 import adsb_classify
+import adsb_store
 import adsb_tracker
 import adsb_web
+import airspace
 import config
 import geo
 import military_callsigns
+import radio_intel
 import transcription
 from config import (
     ATC_CORRECTIONS,
@@ -851,6 +854,17 @@ class Transcriber:
             tier = max(tier, TIER_INTEREST)
         _send_telegram(text, ts, icao, station_name, tier, military)
         _send_discord(text, ts, ts_iso, icao, station_name, tier, rec_name, military)
+        mentions = _process_radio_intel(
+            text, icao, station_name, ts, ts_iso, tier, military, recording, self._state,
+        )
+        if mentions:
+            self._tui_log(Text(
+                f"{'':>{len(ts) + 2}} \U0001f4fb " + " · ".join(
+                    m.callsign.canonical + (f" → {m.track.label()}" if m.track is not None else "")
+                    for m in mentions
+                ),
+                style="cyan",
+            ))
         _transcript_feed.add({
             "at": time.time(),
             "ts": ts,
@@ -859,6 +873,14 @@ class Transcriber:
             "text": text,
             "tier": tier,
             "military": [m.label for m in military if m.strong],
+            "callsigns": [
+                {
+                    "callsign": m.callsign.canonical,
+                    "kind": m.callsign.kind,
+                    "hex": m.track.hex if m.track is not None else "",
+                }
+                for m in mentions
+            ],
         })
         if self._log_file:
             try:
@@ -1215,10 +1237,14 @@ class DiscordOutbox:
         priority: bool = False,
         message_id: Optional[str] = None,
         allowed_mentions: Optional[dict] = None,
+        file_path: Optional[str] = None,
     ) -> None:
         if not config.DISCORD_ENABLED or not channel_id:
             return
-        item = (channel_id, content, dict(embed) if embed else None, message_id, allowed_mentions)
+        item = (
+            channel_id, content, dict(embed) if embed else None, message_id,
+            allowed_mentions, file_path,
+        )
         try:
             self._queue.put_nowait(item)
             return
@@ -1247,19 +1273,19 @@ class DiscordOutbox:
             if item is None:
                 self._queue.task_done()
                 break
-            channel_id, content, embed, message_id, allowed_mentions = item
+            channel_id, content, embed, message_id, allowed_mentions, file_path = item
             try:
                 if message_id:
                     _edit_discord(channel_id, message_id, content=content, embed=embed)
                 else:
                     _post_discord(
                         channel_id, content=content, embed=embed,
-                        allowed_mentions=allowed_mentions,
+                        allowed_mentions=allowed_mentions, file_path=file_path,
                     )
             finally:
                 self._queue.task_done()
             # Discord allows ~5 messages / 5s per channel; a small gap keeps a
-            # busy airshow feed from spending its time in 429 retries.
+            # busy feed from spending its time in 429 retries.
             self._stop.wait(0.25)
 
     def shutdown(self) -> None:
@@ -1304,10 +1330,23 @@ def _discord_payload(
     return payload
 
 
-def _discord_request(method: str, url: str, payload: dict, what: str) -> Optional[dict]:
+def _discord_request(
+    method: str, url: str, payload: dict, what: str, file: Optional[tuple] = None,
+) -> Optional[dict]:
     headers = {"Authorization": f"Bot {config.DISCORD_BOT_TOKEN}"}
+
+    def send():
+        if file is None:
+            return _http.request(method, url, json=payload, headers=headers, timeout=10)
+        name, data, ctype = file
+        return _http.request(
+            method, url, headers=headers, timeout=30,
+            data={"payload_json": json.dumps(payload)},
+            files={"files[0]": (name, data, ctype)},
+        )
+
     try:
-        resp = _http.request(method, url, json=payload, headers=headers, timeout=10)
+        resp = send()
         if resp.status_code == 429:
             retry_after = 1.0
             try:
@@ -1315,7 +1354,7 @@ def _discord_request(method: str, url: str, payload: dict, what: str) -> Optiona
             except Exception:
                 pass
             time.sleep(min(retry_after, 5.0) + 0.05)
-            resp = _http.request(method, url, json=payload, headers=headers, timeout=10)
+            resp = send()
         if resp.status_code >= 400:
             if _display_ref is not None:
                 _display_ref.log(Text(
@@ -1335,15 +1374,25 @@ def _post_discord(
     content: Optional[str] = None,
     embed: Optional[dict] = None,
     allowed_mentions: Optional[dict] = None,
+    file_path: Optional[str] = None,
 ) -> Optional[str]:
     if not config.DISCORD_ENABLED or not channel_id:
         return None
     payload = _discord_payload(content, embed, allowed_mentions)
     if not payload:
         return None
+    file = None
+    if file_path:
+        try:
+            path = Path(file_path)
+            if path.stat().st_size <= config.RADIO_ATTACH_MAX_BYTES:
+                file = (path.name, path.read_bytes(), "audio/wav")
+                payload["attachments"] = [{"id": 0, "filename": path.name}]
+        except OSError:
+            file = None
     data = _discord_request(
         "POST", f"{_DISCORD_API}/channels/{channel_id}/messages", payload,
-        f"send [{channel_id}]",
+        f"send [{channel_id}]", file=file,
     )
     return (data or {}).get("id")
 
@@ -1373,16 +1422,21 @@ def _enqueue_discord(
     priority: bool = False,
     message_id: Optional[str] = None,
     allowed_mentions: Optional[dict] = None,
+    file_path: Optional[str] = None,
 ) -> None:
     if _discord_outbox is not None:
         _discord_outbox.submit(
             channel_id, content=content, embed=embed, priority=priority,
             message_id=message_id, allowed_mentions=allowed_mentions,
+            file_path=file_path,
         )
     elif message_id:
         _edit_discord(channel_id, message_id, content=content, embed=embed)
     else:
-        _post_discord(channel_id, content=content, embed=embed, allowed_mentions=allowed_mentions)
+        _post_discord(
+            channel_id, content=content, embed=embed,
+            allowed_mentions=allowed_mentions, file_path=file_path,
+        )
 
 
 def _pin_discord(channel_id: str, message_id: str) -> None:
@@ -1648,19 +1702,30 @@ def _broadcast_stream_status(station: dict, connected: bool, detail: str = "") -
 _ADSB_ATTRIBUTION = "Data: [adsb.fi](https://adsb.fi) · [globe](https://globe.adsbexchange.com/)"
 
 _adsb_board_message: dict = {}  # channel_id -> message_id
-_ADSB_BOARD_MARKERS = ("Military & display", "Gold Coast air picture")
+_ADSB_BOARD_MARKERS = ("Military & notable", "Military & display", "Gold Coast air picture")
 
 _ADSB_EVENT_ICON = {
     adsb_tracker.EV_APPEARED: "\U0001f4e1",       # satellite antenna
     adsb_tracker.EV_DISAPPEARED: "\U0001f4f4",    # phone off
-    adsb_tracker.EV_BOX_ENTER: "\U0001f3af",      # target
-    adsb_tracker.EV_BOX_EXIT: "↗️",
+    adsb_tracker.EV_ZONE_ENTER: "\U0001f3af",     # target
+    adsb_tracker.EV_ZONE_EXIT: "↗️",
+    adsb_tracker.EV_ZONE_PREDICT: "⏱️",
     adsb_tracker.EV_DEPARTURE: "\U0001f6eb",
     adsb_tracker.EV_INBOUND: "\U0001f6ec",
     adsb_tracker.EV_LANDED: "\U0001f6ec",
     adsb_tracker.EV_EMERGENCY: "\U0001f6a8",
     adsb_tracker.EV_POSITION: "\U0001f6e9️",
 }
+
+
+def _heard_text(heard: Optional[dict]) -> str:
+    """'YBCG_TWR 2 min ago: “Wolf two one, cleared…”'."""
+    if not heard:
+        return ""
+    mins = max(0, int((time.time() - heard.get("at", 0)) // 60))
+    when = "just now" if mins == 0 else f"{mins} min ago"
+    quote = (heard.get("text") or "")[:200]
+    return f"{heard.get('icao', '?')} {when}: “{quote}”"
 
 
 def _adsb_event_embed(ev) -> dict:
@@ -1681,12 +1746,17 @@ def _adsb_event_embed(ev) -> dict:
         "timestamp": _now_iso(),
     }
     fields = []
+    if ev.zone_name:
+        fields.append({"name": "Zone", "value": ev.zone_name, "inline": True})
     if track.reg:
         fields.append({"name": "Registration", "value": track.reg, "inline": True})
     if track.typ:
         fields.append({"name": "Type", "value": track.typ, "inline": True})
     if track.squawk:
         fields.append({"name": "Squawk", "value": track.squawk, "inline": True})
+    heard = _heard_text(track.heard())
+    if heard:
+        fields.append({"name": "\U0001f4fb Last heard", "value": heard[:1024], "inline": False})
     reasons = track.classification.reason_text()
     if reasons:
         # Why this was flagged. Shown on every alert on purpose: a bad
@@ -1694,12 +1764,14 @@ def _adsb_event_embed(ev) -> dict:
         # something you have to go digging in the code to work out.
         fields.append({"name": "Matched on", "value": reasons[:1024], "inline": False})
     if fields:
-        embed["fields"] = fields[:6]
+        embed["fields"] = fields[:7]
     return embed
 
 
 def _adsb_channels_for(ev) -> list:
     """Which channels this event belongs in."""
+    if ev.kind in adsb_tracker.ZONE_EVENTS:
+        return [config.DISCORD_CHANNEL_AIRSPACE] if config.DISCORD_CHANNEL_AIRSPACE else []
     channels = []
     if ev.military or ev.track.classification.interesting:
         if config.DISCORD_CHANNEL_MILITARY:
@@ -1727,14 +1799,13 @@ def _send_adsb_event(ev, state: SharedState) -> None:
 
     # The live-card view already carries these — a fresh post per poll is
     # exactly the position spam we are getting rid of, so route them to the
-    # cards only. Emergencies, box entries and aerodrome movements are discrete
+    # cards only. Emergencies, zone events and aerodrome movements are discrete
     # and still worth their own message.
     cards_on = config.DISCORD_ENABLED and config.ADSB_LIVE_CARDS_ENABLED
     card_covered = ev.kind in (
         adsb_tracker.EV_APPEARED,
         adsb_tracker.EV_POSITION,
         adsb_tracker.EV_DISAPPEARED,
-        adsb_tracker.EV_BOX_EXIT,
     )
     if not (cards_on and card_covered):
         for channel_id in _adsb_channels_for(ev):
@@ -1753,7 +1824,7 @@ def _send_adsb_event(ev, state: SharedState) -> None:
     # over water flaps, so it is deliberately not one of them.
     if config.TELEGRAM_ENABLED and (
         emergency
-        or ev.kind == adsb_tracker.EV_BOX_ENTER
+        or (ev.kind == adsb_tracker.EV_ZONE_ENTER and ev.tier >= TIER_INTEREST)
         or (ev.military and ev.kind == adsb_tracker.EV_APPEARED)
     ):
         detail = f"\n{html.escape(ev.detail)}" if ev.detail else ""
@@ -1778,9 +1849,9 @@ def _render_adsb_board(board: dict) -> str:
         dist = f"{r['dist_nm']:.0f}" if r["dist_nm"] is not None else "?"
         brg = geo.compass_point(r["bearing"]) if r["bearing"] is not None else "?"
         note = []
-        if r["in_box"]:
-            note.append("IN BOX")
-        note.append(r["title"] or ("military" if r["military"] else "probable display"))
+        if r["zone_names"]:
+            note.append("IN " + "/".join(r["zone_names"]))
+        note.append(r["title"] or ("military" if r["military"] else "probable military"))
         name = (r["ident"] or r["reg"] or r["hex"].upper())[:10]
         lines.append(
             f"{name:10} {(r['type'] or '?')[:5]:5} {alt:>7} {gs:>4} "
@@ -1794,13 +1865,13 @@ def _render_adsb_board(board: dict) -> str:
 
 def _adsb_board_embed(board: dict) -> dict:
     rows = board.get("military") or []
-    box = board.get("box") or []
+    zoned = [r for r in rows if r.get("in_zone")]
     summary = (
-        f"{len(rows)} tracked · {len(box)} in the display box · "
+        f"{len(rows)} tracked · {len(zoned)} inside a watched zone · "
         f"{board.get('tracks', 0)} aircraft in range · source {board.get('source', '?')}"
     )
     return {
-        "title": "\U0001f396️ Military & display — Gold Coast",
+        "title": "\U0001f396️ Military & notable — Gold Coast",
         "description": f"{_render_adsb_board(board)}\n{summary}\n{_ADSB_ATTRIBUTION}",
         "color": 0xE67E22 if rows else 0x2ECC71,
         "footer": {"text": _now_ts()},
@@ -1809,7 +1880,7 @@ def _adsb_board_embed(board: dict) -> dict:
 
 
 _CARD_COLOURS = {
-    "box": 0xE74C3C,
+    "zone": 0xE74C3C,
     "mil": 0xE67E22,
     "prob": 0x95A5A6,
     "lost": 0x596273,
@@ -1936,7 +2007,7 @@ class _AdsbLiveCards:
 
     def _embed(self, group: dict, now: float, lost: bool) -> tuple:
         formation = group["formation"] and group["size"] >= 2
-        icon = "\U0001f507" if lost else ("\U0001f3af" if group["in_box"] else "\U0001f4e1")
+        icon = "\U0001f507" if lost else ("\U0001f3af" if group["in_zone"] else "\U0001f4e1")
         label, typ, members = group["label"], group["family"] or "?", group["members"]
 
         if formation:
@@ -1969,6 +2040,11 @@ class _AdsbLiveCards:
             pos = _card_position_line(members[0])
             if pos:
                 lines.append(pos)
+        if group.get("zone_names") and not lost:
+            lines.append("\U0001f6e1️ In " + ", ".join(group["zone_names"]))
+        heard = next((m.get("heard") for m in members if m.get("heard")), None)
+        if heard and not lost:
+            lines.append(f"\U0001f4fb {_heard_text(heard)}")
         if lost:
             when = datetime.fromtimestamp(now, _AEST).strftime("%H:%M")
             lines.append(f"_No longer in range — last tracked ~{when}._")
@@ -1978,7 +2054,7 @@ class _AdsbLiveCards:
 
         colour = (
             _CARD_COLOURS["lost"] if lost
-            else _CARD_COLOURS["box"] if group["in_box"]
+            else _CARD_COLOURS["zone"] if group["in_zone"]
             else _CARD_COLOURS["mil"] if group["military"]
             else _CARD_COLOURS["prob"]
         )
@@ -2096,7 +2172,7 @@ def _init_adsb_board_messages(state: SharedState) -> None:
     if not channel_id:
         return
     embed = {
-        "title": "\U0001f396️ Military & display — Gold Coast",
+        "title": "\U0001f396️ Military & notable — Gold Coast",
         "description": f"Starting up…\n{_ADSB_ATTRIBUTION}",
         "color": 0x95A5A6,
         "footer": {"text": _now_ts()},
@@ -2109,6 +2185,376 @@ def _init_adsb_board_messages(state: SharedState) -> None:
     if message_id:
         _adsb_board_message[channel_id] = message_id
         _pin_discord(channel_id, message_id)
+
+
+# ---------------------------------------------------------------------------
+# #airspace-watch: radio callsign flags, the zone board and the daily digest
+#
+# Zone events arrive through _send_adsb_event like every other TrackEvent.
+# What lives here is the radio side (radio_intel), which joins a callsign heard
+# on frequency to the aircraft it belongs to, plus the two pinned/periodic
+# views of the same picture.
+# ---------------------------------------------------------------------------
+
+_radio_cooldown = radio_intel.FlagCooldown(config.RADIO_FLAG_COOLDOWN_SEC)
+_radio_store_ref: Optional[adsb_store.AdsbStore] = None
+
+_KIND_ICON = {
+    radio_intel.KIND_MILITARY: "\U0001f396️",
+    radio_intel.KIND_SPECIAL: "\U0001f691",
+    radio_intel.KIND_AIRLINE: "✈️",
+    radio_intel.KIND_REGISTRATION: "\U0001f6e9️",
+}
+_KIND_LABEL = {
+    radio_intel.KIND_MILITARY: "Military callsign",
+    radio_intel.KIND_SPECIAL: "Emergency services",
+    radio_intel.KIND_AIRLINE: "Airline",
+    radio_intel.KIND_REGISTRATION: "Registration",
+}
+_ROLE_SHORT = {
+    "emergency": "EMRG", "watch": "WATCH", "military": "MIL", "probable": "PROB",
+    "special": "SPEC", "notable": "NOTE", "anon_fast": "ANON",
+}
+
+
+def _radio_store() -> adsb_store.AdsbStore:
+    """The poller's store when tracking is on; a standalone one otherwise."""
+    global _radio_store_ref
+    if _adsb_poller is not None and _adsb_poller.store is not None:
+        return _adsb_poller.store
+    if _radio_store_ref is None:
+        _radio_store_ref = adsb_store.AdsbStore()
+    return _radio_store_ref
+
+
+def _zone_names() -> dict:
+    if _adsb_poller is not None:
+        return _adsb_poller.zone_names()
+    return {z.id: z.name for z in airspace.ZoneSet().all()}
+
+
+def _process_radio_intel(
+    text: str,
+    icao: str,
+    station_name: str,
+    ts: str,
+    ts_iso: str,
+    tier: int,
+    military: list,
+    recording: Optional[Path],
+    state: SharedState,
+) -> list:
+    """Extract callsigns, attach them to tracks, log them, flag what matters."""
+    if not config.RADIO_INTEL_ENABLED:
+        return []
+    poller = _adsb_poller
+    try:
+        mentions = radio_intel.analyse(text, icao, poller, military)
+    except Exception as exc:
+        if _display_ref is not None:
+            _display_ref.log(Text(f"⚠ Radio callsign analysis failed: {exc}", style="dim yellow"))
+        return []
+    store = _radio_store()
+    now = time.time()
+    store.log_transmission(now, icao, tier)
+    rec_name = recording.name if recording else ""
+    flagged = []
+    for m in mentions:
+        if m.track is not None and poller is not None:
+            poller.note_heard(m.track.hex, {
+                "at": now, "icao": icao, "station": station_name, "text": text[:300],
+                "callsign": m.callsign.canonical, "recording": rec_name,
+            })
+        flag = radio_intel.should_flag(m, tier) and (
+            tier >= TIER_EMERGENCY
+            or _radio_cooldown.ready((m.callsign.canonical, icao), now)
+        )
+        if flag:
+            flagged.append(m)
+        store.log_mention({
+            "at": now, "icao": icao, "callsign": m.callsign.canonical,
+            "kind": m.callsign.kind,
+            "hex": m.track.hex if m.track is not None else "",
+            "ident": m.track.label() if m.track is not None else "",
+            "flagged": flag, "text": text, "recording": rec_name,
+        })
+    if flagged and not state.paused:
+        _send_radio_flag(
+            flagged, text, icao, station_name, ts, ts_iso, tier,
+            str(recording) if recording else "",
+        )
+    return mentions
+
+
+def _mention_field(m, zone_names: dict) -> dict:
+    cs = m.callsign
+    head = _KIND_LABEL[cs.kind]
+    if cs.detail:
+        head += f" — {cs.detail}"
+    if cs.kind == radio_intel.KIND_MILITARY and not cs.strong:
+        head += " (possible)"
+    lines = [head]
+    t = m.track
+    if t is not None:
+        ident = f"**{t.label()}** · {t.typ or '?'}"
+        if t.reg and t.reg != t.label():
+            ident += f" · {t.reg}"
+        lines.append(f"Tracked: {ident}")
+        pos = t.position_text()
+        if pos:
+            lines.append(pos)
+        if m.zones:
+            lines.append("\U0001f6e1️ In " + ", ".join(zone_names.get(z, z) for z in m.zones))
+        if m.roles:
+            lines.append(adsb_tracker.roles_label(m.roles))
+        lines.append(f"[Track on globe]({t.globe_url()})")
+    else:
+        lines.append("_No matching ADS-B track in range_")
+    return {
+        "name": f"{_KIND_ICON[cs.kind]} {cs.canonical}"[:256],
+        "value": "\n".join(lines)[:1024],
+        "inline": False,
+    }
+
+
+def _send_radio_flag(
+    flagged: list,
+    text: str,
+    icao: str,
+    station_name: str,
+    ts: str,
+    ts_iso: str,
+    tier: int,
+    recording_path: str,
+) -> None:
+    channel_id = config.DISCORD_CHANNEL_AIRSPACE
+    if _display_ref is not None:
+        _display_ref.log(Text(
+            f"\U0001f6e1 Flagged {', '.join(m.callsign.canonical for m in flagged)} on {icao}",
+            style="bold magenta",
+        ))
+    if not (config.DISCORD_ENABLED and channel_id):
+        return
+    # #airspace-watch falling back to #alerts already carries an alert-tier
+    # transcript; only repeat it there when correlation adds something.
+    if (
+        channel_id == DISCORD_ALERTS_CHANNEL_ID
+        and tier > TIER_NONE
+        and not any(m.track is not None for m in flagged)
+    ):
+        return
+
+    roles = set().union(*(m.roles for m in flagged))
+    kinds = {m.callsign.kind for m in flagged}
+    if tier >= TIER_EMERGENCY or "emergency" in roles:
+        colour = _TIER_COLOR[TIER_EMERGENCY]
+    elif radio_intel.KIND_MILITARY in kinds or "military" in roles:
+        colour = 0xE67E22
+    elif radio_intel.KIND_SPECIAL in kinds or "special" in roles:
+        colour = 0x3498DB
+    else:
+        colour = 0x9B59B6
+    names = _zone_names()
+    rec_name = Path(recording_path).name if recording_path else ""
+    embed = {
+        "title": (
+            f"\U0001f4fb {', '.join(m.callsign.canonical for m in flagged)} — "
+            f"{icao} {station_name}"
+        )[:256],
+        "description": f"> {text}",
+        "color": colour,
+        "fields": [_mention_field(m, names) for m in flagged[:6]],
+        "footer": {"text": f"{ts} · {rec_name}" if rec_name else ts},
+        "timestamp": ts_iso,
+    }
+    attach = recording_path if (config.RADIO_ATTACH_AUDIO and recording_path) else None
+    _enqueue_discord(channel_id, embed=embed, priority=tier > TIER_NONE, file_path=attach)
+
+
+# --- pinned zone board ------------------------------------------------------
+
+_airspace_board_message: dict = {}
+_airspace_board_last: dict = {}
+_AIRSPACE_BOARD_MARKERS = ("Airspace watch",)
+
+
+def _render_airspace_board(board: dict) -> str:
+    out = []
+    for z in board.get("zones") or []:
+        occ, inc = z["occupants"], z["incoming"]
+        out.append(f"**{z['name']}** · {z['alt']} · {z['count']} aircraft")
+        if not occ and not inc:
+            out.append("_clear_")
+            continue
+        rows = []
+        for r in occ[:6]:
+            alt = "grnd" if r["on_ground"] else (
+                format(r["alt_ft"], ",") if r["alt_ft"] is not None else "?"
+            )
+            name = (r["ident"] or r["reg"] or r["hex"].upper())[:9]
+            tags = " ".join(_ROLE_SHORT.get(x, x) for x in r["roles"])
+            heard = " \U0001f4fb" if r.get("heard") else ""
+            rows.append(f"{name:9} {(r['type'] or '?')[:5]:5} {alt:>7}  {tags}{heard}")
+        if len(occ) > 6:
+            rows.append(f"… and {len(occ) - 6} more")
+        if rows:
+            out.append("```\n" + "\n".join(rows) + "\n```")
+        for i in inc[:3]:
+            eta = max(1, round((i["eta_sec"] or 0) / 60))
+            out.append(f"↘ inbound **{i['label']}** ~{eta} min")
+    return "\n".join(out) or "_No zones enabled._"
+
+
+def _airspace_board_embed(body: str, starting: bool = False) -> dict:
+    return {
+        "title": "\U0001f6e1️ Airspace watch — Gold Coast",
+        "description": (
+            f"{'Starting up…' if starting else body}"[:3800]
+            + f"\n\n{_ADSB_ATTRIBUTION}"
+        ),
+        "color": 0x95A5A6 if starting else 0x3498DB,
+        "footer": {"text": f"updated {_now_ts()} · shapes approximate, not for navigation"},
+        "timestamp": _now_iso(),
+    }
+
+
+def _init_airspace_board() -> None:
+    """Create or adopt the pinned zone board. Main thread, startup only."""
+    channel_id = config.DISCORD_CHANNEL_AIRSPACE
+    if not (config.DISCORD_ENABLED and config.ADSB_ENABLED and channel_id):
+        return
+    embed = _airspace_board_embed("", starting=True)
+    existing = _find_existing_status_message(channel_id, _AIRSPACE_BOARD_MARKERS)
+    if existing and _edit_discord(channel_id, existing, embed=embed):
+        _airspace_board_message[channel_id] = existing
+        return
+    message_id = _post_discord(channel_id, embed=embed)
+    if message_id:
+        _airspace_board_message[channel_id] = message_id
+        _pin_discord(channel_id, message_id)
+
+
+def _broadcast_airspace_board(board: dict) -> None:
+    channel_id = config.DISCORD_CHANNEL_AIRSPACE
+    if not (config.DISCORD_ENABLED and channel_id):
+        return
+    if _discord_outbox is not None and _discord_outbox.depth > 50:
+        return
+    body = _render_airspace_board(board)
+    if _airspace_board_last.get(channel_id) == body:
+        return
+    _airspace_board_last[channel_id] = body
+    embed = _airspace_board_embed(body)
+    message_id = _airspace_board_message.get(channel_id)
+    if message_id:
+        _enqueue_discord(channel_id, embed=embed, message_id=message_id)
+    else:
+        _enqueue_discord(channel_id, embed=embed)
+
+
+def _on_adsb_board(board: dict) -> None:
+    _broadcast_adsb_board(board)
+    try:
+        _broadcast_airspace_board(board)
+    except Exception as exc:
+        if _display_ref is not None:
+            _display_ref.log(Text(f"⚠ Airspace board failed: {exc}", style="dim yellow"))
+
+
+# --- daily digest -----------------------------------------------------------
+
+def _digest_embed(since: float, until: float) -> dict:
+    d = _radio_store().digest(since, until)
+    names = _zone_names()
+    local = datetime.fromtimestamp(until, ZoneInfo(config.TIMEZONE))
+    fields = []
+
+    mil = d["military"]
+    labels = [f"{m['ident'] or m['reg'] or m['hex'].upper()} ({m['typ'] or '?'})" for m in mil]
+    value = f"**{len(mil)}** seen"
+    if labels:
+        value += "\n" + ", ".join(labels[:15]) + (f" … +{len(labels) - 15}" if len(labels) > 15 else "")
+    fields.append({"name": "\U0001f396️ Military aircraft", "value": value[:1024], "inline": False})
+
+    zones = sorted(d["zones"].items(), key=lambda kv: -kv[1])
+    fields.append({
+        "name": "\U0001f6e1️ Flagged zone entries",
+        "value": "\n".join(f"{names.get(z, z or '?')}: **{n}**" for z, n in zones) or "None",
+        "inline": True,
+    })
+    fields.append({
+        "name": "\U0001f4fb Most-heard callsigns",
+        "value": "\n".join(f"`{cs}` ×{n}" for cs, _kind, n in d["callsigns"]) or "None",
+        "inline": True,
+    })
+    stations = sorted(d["stations"].items(), key=lambda kv: -kv[1]["total"])
+    fields.append({
+        "name": "\U0001f399️ Radio traffic",
+        "value": "\n".join(
+            f"{icao}: **{s['total']}** tx · busiest {s['busiest_hour']:02d}:00"
+            for icao, s in stations if s["busiest_hour"] is not None
+        ) or "No transmissions logged",
+        "inline": False,
+    })
+    ev = d["events"]
+    fields.append({
+        "name": "\U0001f6a8 Alerts",
+        "value": (
+            f"Emergency squawks: **{ev.get('emergency', 0)}** · "
+            f"radio emergency calls: **{d['radio_emergencies']}**\n"
+            f"Radio callsign flags: **{d['flagged_mentions']}** · "
+            f"predicted entries: **{ev.get('zone_predict', 0)}**\n"
+            f"Transponders on: {ev.get('appeared', 0)} · off/lost: {ev.get('disappeared', 0)} · "
+            f"{config.ADSB_HOME_ICAO} departures {ev.get('departure', 0)} / "
+            f"landings {ev.get('landed', 0)}"
+        ),
+        "inline": False,
+    })
+    return {
+        "title": f"\U0001f5de️ Daily airspace digest — {local.strftime('%a %d %b')}",
+        "description": f"The 24 hours to {local.strftime('%H:%M')}.",
+        "color": 0x1ABC9C,
+        "fields": fields,
+        "footer": {"text": "ADS-B data adsb.fi · radio via LiveATC"},
+        "timestamp": _now_iso(),
+    }
+
+
+def _post_digest(channel_id: str = "") -> bool:
+    channel_id = channel_id or config.DISCORD_CHANNEL_AIRSPACE
+    if not (config.DISCORD_ENABLED and channel_id):
+        return False
+    now = time.time()
+    _enqueue_discord(channel_id, embed=_digest_embed(now - 86400, now))
+    return True
+
+
+def _digest_due(now_local: datetime, spec: str, last_sent: str) -> bool:
+    """Has today's DIGEST_TIME passed without a digest going out?"""
+    try:
+        hh, mm = (int(x) for x in spec.split(":"))
+    except ValueError:
+        return False
+    if (now_local.hour, now_local.minute) < (hh, mm):
+        return False
+    return last_sent != now_local.strftime("%Y-%m-%d")
+
+
+def _digest_loop(state: SharedState) -> None:
+    tz = ZoneInfo(config.TIMEZONE)
+    while not state.stop_event.wait(30):
+        try:
+            store = _radio_store()
+            now_local = datetime.now(tz)
+            if not _digest_due(now_local, config.DIGEST_TIME, store.get_meta("digest_last")):
+                continue
+            # Marked first, so a Discord failure cannot turn into a retry loop.
+            store.set_meta("digest_last", now_local.strftime("%Y-%m-%d"))
+            _post_digest()
+            store.prune(config.RECORDING_RETENTION_DAYS)
+        except Exception as exc:
+            if _display_ref is not None:
+                _display_ref.log(Text(f"⚠ Daily digest failed: {exc}", style="dim yellow"))
 
 
 # ---------------------------------------------------------------------------
@@ -2129,7 +2575,7 @@ def _resolve_station(arg: str) -> Optional[dict]:
 
 
 def _adsb_rows_text(rows: list, empty: str) -> str:
-    """Rows as a <pre> table. Shared by /air, /mil and /box.
+    """Rows as a <pre> table. Shared by /air, /mil and /zone.
 
     Responses are written in the same HTML subset the Telegram handler uses;
     _html_to_discord_md converts for Discord, so one implementation serves
@@ -2158,19 +2604,82 @@ def _handle_adsb_command(
     respond: Callable[[str], None],
     tui: Callable[..., None],
     source: str,
+    rest: str = "",
 ) -> None:
-    """/air /mil /box /track /adsb /watch /unwatch — transport-agnostic."""
+    """/air /mil /zones /zone /predict /track /adsb /watch /unwatch."""
     poller = _adsb_poller
     if poller is None:
         respond(
             "\U0001f6e9 ADS-B tracking is not running.\n"
-            "Set <code>DISCORD_CHANNEL_MILITARY</code> and/or "
-            "<code>DISCORD_CHANNEL_FLIGHTS</code> in <code>.env</code>, "
+            "Set <code>DISCORD_CHANNEL_AIRSPACE</code>, <code>DISCORD_CHANNEL_MILITARY</code> "
+            "and/or <code>DISCORD_CHANNEL_FLIGHTS</code> in <code>.env</code>, "
             "or check you did not start with <code>--no-adsb</code>."
         )
         return
 
     arg_l = arg.strip().lower()
+
+    if cmd in ("zones", "box") or (cmd == "zone" and not arg):
+        board = poller.snapshot_board()
+        summary = {z["id"]: z for z in board["zones"]}
+        lines = ["\U0001f6e1 <b>Airspace zones</b> (approximate, not for navigation)"]
+        for z in poller.zones.all():
+            on = poller.zones.is_enabled(z)
+            s = summary.get(z.id)
+            line = (
+                f"{'✅' if on else '⛔'} <code>{z.id}</code> {html.escape(z.name)} · {z.alt_text()}"
+            )
+            if s is not None:
+                line += f" · {s['count']} aircraft, {len(s['occupants'])} flagged"
+                for r in s["occupants"][:4]:
+                    name = r["ident"] or r["reg"] or r["hex"].upper()
+                    line += f"\n   • {html.escape(name)} ({html.escape(adsb_tracker.roles_label(r['roles']))})"
+                for i in s["incoming"][:3]:
+                    line += (
+                        f"\n   ↘ {html.escape(i['label'])} inbound "
+                        f"~{max(1, round((i['eta_sec'] or 0) / 60))} min"
+                    )
+            else:
+                line += " (off)"
+            lines.append(line)
+        if poller.zones.error:
+            lines.append(f"⚠ <code>{html.escape(poller.zones.error)}</code>")
+        lines.append(
+            f"Predicted-entry alerts: <b>{'ON' if poller.predict_enabled else 'OFF'}</b>\n"
+            "<code>/zone &lt;id&gt;</code> · <code>/zone on|off &lt;id&gt;</code>"
+        )
+        respond("\n".join(lines))
+        return
+
+    if cmd == "zone":
+        if arg_l in ("on", "off"):
+            zone = poller.zones.find(rest)
+            if zone is None or not poller.set_zone_enabled(zone.id, arg_l == "on"):
+                respond(f"⚠ Unknown zone <code>{html.escape(rest)}</code> — see <code>/zones</code>")
+                return
+            respond(f"\U0001f6e1 {html.escape(zone.name)}: <b>{arg_l.upper()}</b>")
+            tui(f"{source} → zone {zone.id} {arg_l.upper()}")
+            return
+        zone = poller.zones.find(" ".join(b for b in (arg, rest) if b))
+        if zone is None:
+            respond(f"⚠ Unknown zone <code>{html.escape(arg)}</code> — see <code>/zones</code>")
+            return
+        rows = poller.snapshot(zone=zone.id, airborne_only=False)
+        respond(
+            f"\U0001f6e1 <b>{html.escape(zone.name)}</b> · {zone.alt_text()}\n"
+            + _adsb_rows_text(rows, "Nothing inside right now.")
+        )
+        return
+
+    if cmd == "predict":
+        if arg_l in ("on", "off"):
+            poller.predict_enabled = arg_l == "on"
+            tui(f"{source} → predicted-entry alerts {arg_l.upper()}")
+        respond(
+            f"⏱ Predicted-entry alerts: <b>{'ON' if poller.predict_enabled else 'OFF'}</b> "
+            f"(horizon {config.AIRSPACE_PREDICT_MIN:.0f} min)"
+        )
+        return
 
     if cmd == "adsb":
         if arg_l in ("on", "off"):
@@ -2184,7 +2693,8 @@ def _handle_adsb_command(
             "\U0001f4e1 <b>ADS-B tracking</b>",
             f"State: <b>{'ON' if h['enabled'] else 'OFF'}</b> · source <code>{h['source']}</code>",
             f"Last poll: {f'{age:.0f}s ago' if age is not None else 'never'} ({h['polls']} polls)",
-            f"Tracking: {h['tracks']} aircraft · {h['military']} military · {h['in_box']} in the box",
+            f"Tracking: {h['tracks']} aircraft · {h['military']} military · "
+            f"{h['in_zone']} flagged in zones ({h['zones']} zones active)",
             f"Events sent: {h['events']} · rate-limited away: {h['suppressed']}",
             f"Requests: {h['requests']} · failures: {h['failures']} · 429s: {h['rate_limited']}",
         ]
@@ -2240,7 +2750,7 @@ def _handle_adsb_command(
                 )
                 return
             r = reports[0]
-            cls = adsb_classify.classify(r, in_box=False)
+            cls = adsb_classify.classify(r)
             respond(
                 f"\U0001f50d <b>{html.escape(r.label())}</b> — outside the tracked area\n"
                 f"{html.escape(r.reg or '')} {html.escape(r.descr or r.typ or '')}\n"
@@ -2251,13 +2761,23 @@ def _handle_adsb_command(
             return
         t = found[0]
         cls = t.classification
+        names = poller.zone_names()
         lines = [
             f"\U0001f50d <b>{html.escape(t.label())}</b>",
             html.escape(cls.title or t.descr or t.typ or "unidentified"),
             html.escape(t.position_text()),
-            f"State: {t.state} · phase: {t.phase}"
-            + (" · <b>IN THE DISPLAY BOX</b>" if t.in_box else ""),
+            f"State: {t.state} · phase: {t.phase}",
         ]
+        if t.zones:
+            lines.append(
+                "\U0001f6e1 In <b>" + html.escape(", ".join(names.get(z, z) for z in sorted(t.zones))) + "</b>"
+            )
+        roles = t.roles()
+        if roles:
+            lines.append(f"Roles: {html.escape(adsb_tracker.roles_label(roles))}")
+        heard = _heard_text(t.heard())
+        if heard:
+            lines.append(f"\U0001f4fb Last heard {html.escape(heard)}")
         if t.squawk:
             lines.append(f"Squawk: <code>{t.squawk}</code>")
         if cls.signals:
@@ -2278,16 +2798,8 @@ def _handle_adsb_command(
     if cmd == "mil":
         rows = poller.snapshot(military_only=True, airborne_only=False)
         respond(
-            "\U0001f396 <b>Military &amp; display aircraft</b>\n"
+            "\U0001f396 <b>Military &amp; probable military aircraft</b>\n"
             + _adsb_rows_text(rows, "Nothing military or unusual in range.")
-        )
-        return
-
-    if cmd == "box":
-        rows = poller.snapshot(box_only=True, airborne_only=False)
-        respond(
-            "\U0001f3af <b>Airshow display box</b>\n"
-            + _adsb_rows_text(rows, "The display box is empty.")
         )
         return
 
@@ -2349,13 +2861,19 @@ def _handle_command(
             "/military FALCON — look a callsign up\n"
             "\n<b>Live ADS-B tracking</b>\n"
             "/air — what is airborne in range now\n"
-            "/mil — military &amp; airshow display aircraft only\n"
-            "/box — who is in the airshow display box\n"
+            "/mil — military &amp; probable military aircraft only\n"
             "/track VH-SIC — detail on one aircraft (hex, callsign or rego)\n"
             "/watch 7CF839 — always alert on this aircraft\n"
             "/unwatch 7CF839 — stop watching it\n"
             "/adsb — ADS-B poller health\n"
             "/adsb on|off — toggle ADS-B tracking\n"
+            "\n<b>Airspace watch</b>\n"
+            "/zones — every zone, who is in it, who is inbound\n"
+            "/zone ybcg_ctr — aircraft inside one zone\n"
+            "/zone on|off evans_head — enable or disable a zone\n"
+            "/predict on|off — predicted-entry alerts\n"
+            "/heard QFA412 — recent radio mentions of a callsign\n"
+            "/digest — post the daily digest now\n"
             "/pause — suspend all transcription & forwarding\n"
             "/resume — restart transcription & forwarding\n"
             "/help — this message"
@@ -2397,7 +2915,7 @@ def _handle_command(
             age = time.time() - a["last_poll_at"] if a["last_poll_at"] else None
             lines.append(
                 f"ADS-B: <b>{a['tracks']}</b> tracked "
-                f"({a['military']} military, {a['in_box']} in box) · "
+                f"({a['military']} military, {a['in_zone']} flagged in zones) · "
                 f"polled {f'{age:.0f}s ago' if age is not None else 'never'} · "
                 f"{a['source']}"
                 + (f" · {a['suppressed']} alerts rate-limited" if a["suppressed"] else "")
@@ -2600,8 +3118,33 @@ def _handle_command(
             lines.append("\n/military on|off · /military refresh · /military FALCON")
             respond("\n".join(lines))
 
-    elif cmd in ("air", "mil", "box", "track", "adsb", "watch", "unwatch"):
-        _handle_adsb_command(cmd, arg, respond, tui, source)
+    elif cmd in ("air", "mil", "box", "zones", "zone", "predict", "track", "adsb", "watch", "unwatch"):
+        _handle_adsb_command(cmd, arg, respond, tui, source, rest)
+
+    elif cmd == "heard":
+        rows = _radio_store().recent_mentions(12, arg.strip())
+        if not rows:
+            respond(
+                f"\U0001f4fb No radio mentions of <code>{html.escape(arg.upper())}</code> yet."
+                if arg else "\U0001f4fb No radio callsigns logged yet."
+            )
+            return
+        lines = [f"\U0001f4fb <b>Heard on the radio</b>{' — ' + html.escape(arg.upper()) if arg else ''}"]
+        for r in rows:
+            when = datetime.fromtimestamp(r["at"], _AEST).strftime("%d/%m %H:%M")
+            match = f" → {html.escape(r['ident'])}" if r["ident"] else ""
+            flag = " \U0001f6a9" if r["flagged"] else ""
+            lines.append(
+                f"<code>{when}</code> {r['icao']} <b>{html.escape(r['callsign'])}</b>{match}{flag}\n"
+                f"   {html.escape(r['text'][:120])}"
+            )
+        respond("\n".join(lines))
+
+    elif cmd == "digest":
+        if _post_digest():
+            respond("\U0001f5de Digest posted to the airspace channel.")
+        else:
+            respond("⚠ No airspace channel configured (<code>DISCORD_CHANNEL_AIRSPACE</code>).")
 
     elif cmd in ("pause", "resume"):
         want_paused = cmd == "pause"
@@ -3142,6 +3685,7 @@ def main() -> None:
     _init_stream_status_messages(state)
     if not args.no_adsb:
         _init_adsb_board_messages(state)
+        _init_airspace_board()
 
     with display:
         global _discord_outbox, _transcriber_ref, _adsb_poller, _adsb_live_cards
@@ -3204,7 +3748,7 @@ def main() -> None:
             _adsb_poller = adsb_tracker.AdsbPoller(
                 stop_event=state.stop_event,
                 on_event=lambda ev: _send_adsb_event(ev, state),
-                on_board=_broadcast_adsb_board,
+                on_board=_on_adsb_board,
                 on_log=lambda msg, warn=False: display.log(
                     Text(msg, style="dim yellow" if warn else "dim cyan")
                 ),
@@ -3231,6 +3775,11 @@ def main() -> None:
                     name="adsb-web",
                 ).start()
                 _announce_map_urls()
+
+        if config.DISCORD_ENABLED and config.DIGEST_TIME:
+            threading.Thread(
+                target=_digest_loop, args=(state,), daemon=True, name="digest"
+            ).start()
 
         _send_startup_notification(state)
         if config.DISCORD_ENABLED:

@@ -1,0 +1,113 @@
+{
+  "_comment": [
+    "Named airspace zones watched by the ADS-B tracker (see airspace.py).",
+    "APPROXIMATE shapes for situational awareness only - NOT for navigation.",
+    "Check against the current AIP / VNC before relying on any boundary.",
+    "Edits are picked up live (the file is re-read when its mtime changes).",
+    "Shape: either \"circle\": {lat, lon, radius_nm} or \"polygon\": [[lat, lon], ...].",
+    "floor_ft / ceiling_ft: null means unbounded. Altitudes are pressure altitude from ADS-B.",
+    "triggers: aircraft roles that alert on entry - military, probable, watch, emergency,",
+    "  special (police/rescue/medevac/government), notable (warbird/aerobatic), anon_fast.",
+    "severity: 0 info, 1 interest. anon_signal: an unidentified fast mover low inside",
+    "  this zone is itself a classification signal. lost_sec: faster loss call inside.",
+    "predict: warn before entry when a flagged track is projected to enter."
+  ],
+  "zones": [
+    {
+      "id": "ybcg_ctr",
+      "name": "Gold Coast CTR",
+      "kind": "ctr",
+      "circle": {"lat": -28.1644, "lon": 153.5047, "radius_nm": 10},
+      "floor_ft": null,
+      "ceiling_ft": 4500,
+      "triggers": ["military", "probable", "watch", "emergency", "special", "notable", "anon_fast"],
+      "severity": 1,
+      "color": "#e74c3c",
+      "predict": true
+    },
+    {
+      "id": "gc_coast",
+      "name": "Gold Coast coastal corridor",
+      "kind": "corridor",
+      "note": "Southport Spit to Point Danger, beach and near-shore, low level",
+      "polygon": [
+        [-27.930, 153.415], [-28.000, 153.415], [-28.030, 153.420],
+        [-28.090, 153.440], [-28.130, 153.475], [-28.175, 153.530],
+        [-28.170, 153.590], [-28.120, 153.540], [-28.080, 153.500],
+        [-28.020, 153.480], [-27.950, 153.470], [-27.920, 153.460]
+      ],
+      "floor_ft": null,
+      "ceiling_ft": 2000,
+      "triggers": ["military", "probable", "watch", "emergency", "special", "notable", "anon_fast"],
+      "severity": 1,
+      "color": "#f1c40f",
+      "anon_signal": true,
+      "lost_sec": 60,
+      "predict": true
+    },
+    {
+      "id": "gc_area",
+      "name": "Gold Coast area (30 nm)",
+      "kind": "ring",
+      "circle": {"lat": -28.1644, "lon": 153.5047, "radius_nm": 30},
+      "floor_ft": null,
+      "ceiling_ft": 18000,
+      "triggers": ["military", "watch", "emergency"],
+      "severity": 0,
+      "color": "#3498db",
+      "dwell_sec": 30,
+      "predict": false
+    },
+    {
+      "id": "yamb_ctr",
+      "name": "RAAF Amberley",
+      "kind": "military",
+      "note": "Military aircraft here are routine; add \"military\" to triggers to alert on them",
+      "circle": {"lat": -27.6406, "lon": 152.7117, "radius_nm": 8},
+      "floor_ft": null,
+      "ceiling_ft": 4500,
+      "triggers": ["watch", "emergency", "special", "notable"],
+      "severity": 0,
+      "color": "#9b59b6",
+      "predict": false
+    },
+    {
+      "id": "evans_head",
+      "name": "Evans Head weapons range",
+      "kind": "restricted",
+      "circle": {"lat": -29.17, "lon": 153.40, "radius_nm": 6},
+      "floor_ft": null,
+      "ceiling_ft": 10000,
+      "triggers": ["military", "probable", "watch", "emergency", "notable"],
+      "severity": 1,
+      "color": "#c0392b",
+      "predict": true
+    },
+    {
+      "id": "ybbn_ctr",
+      "name": "Brisbane CTR",
+      "kind": "ctr",
+      "circle": {"lat": -27.3842, "lon": 153.1175, "radius_nm": 10},
+      "floor_ft": null,
+      "ceiling_ft": 4500,
+      "triggers": ["military", "watch", "emergency", "special", "notable"],
+      "severity": 0,
+      "color": "#1abc9c",
+      "enabled": false,
+      "predict": false
+    },
+    {
+      "id": "ybaf_ctr",
+      "name": "Archerfield CTR",
+      "kind": "ctr",
+      "circle": {"lat": -27.5703, "lon": 153.0081, "radius_nm": 4},
+      "floor_ft": null,
+      "ceiling_ft": 1500,
+      "triggers": ["military", "watch", "emergency", "notable"],
+      "severity": 0,
+      "color": "#16a085",
+      "enabled": false,
+      "predict": false
+    }
+  ]
+}

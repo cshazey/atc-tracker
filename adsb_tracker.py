@@ -22,9 +22,10 @@ flickering at the edge of coverage therefore oscillates between LIVE and FADING
 and emits nothing at all, while a genuine transponder shutdown walks all the
 way to LOST and reports once.
 
-Everything else in here is a variation on the same theme: box occupancy uses a
-Schmitt trigger, phase changes need consecutive confirmations, and a token
-bucket caps how much can reach Discord in any one minute.
+Everything else in here is a variation on the same theme: zone occupancy uses
+a Schmitt trigger per zone, phase changes and predicted entries need
+consecutive confirmations, and token buckets cap how much can reach Discord in
+any one minute.
 
 Structure: run() owns threads, sleeps and network. poll_once() is a pure
 function of (reports, now) -> events. All the interesting logic lives in the
@@ -36,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import json
 import threading
 import time
 from dataclasses import dataclass, field
@@ -46,6 +48,7 @@ from zoneinfo import ZoneInfo
 import adsb_classify
 import adsb_source
 import adsb_store
+import airspace
 import config
 import geo
 
@@ -66,13 +69,16 @@ PH_LANDED = "landed"
 # Event kinds.
 EV_APPEARED = "appeared"
 EV_DISAPPEARED = "disappeared"
-EV_BOX_ENTER = "box_enter"
-EV_BOX_EXIT = "box_exit"
+EV_ZONE_ENTER = "zone_enter"
+EV_ZONE_EXIT = "zone_exit"
+EV_ZONE_PREDICT = "zone_predict"
 EV_DEPARTURE = "departure"
 EV_INBOUND = "inbound"
 EV_LANDED = "landed"
 EV_EMERGENCY = "emergency"
 EV_POSITION = "position"
+
+ZONE_EVENTS = frozenset({EV_ZONE_ENTER, EV_ZONE_EXIT, EV_ZONE_PREDICT})
 
 # Alert tiers, mirroring atc_tracker's. Duplicated rather than imported because
 # atc_tracker pulls in mlx/miniaudio and this module must stay importable
@@ -101,10 +107,19 @@ class TrackEvent:
     detail: str = ""
     fields: list = field(default_factory=list)
     military: bool = False
+    zone_id: str = ""
+    zone_name: str = ""
+    roles: tuple = ()
+    eta_sec: Optional[float] = None
 
     @property
     def hex(self) -> str:
         return self.track.hex
+
+    @property
+    def alert_key(self) -> str:
+        """Dedupe key: zone events are per zone, everything else per kind."""
+        return f"{self.kind}:{self.zone_id}" if self.zone_id else self.kind
 
 
 @dataclass
@@ -137,10 +152,16 @@ class Track:
     state: str = ST_SEEDING
     suppress_appear: bool = False
 
-    in_box: bool = False
-    box_since: Optional[float] = None
-    box_pending: Optional[bool] = None
-    box_pending_since: float = 0.0
+    # Zone occupancy, one Schmitt trigger per zone id.
+    zones: set = field(default_factory=set)
+    zone_since: dict = field(default_factory=dict)
+    zone_pending: dict = field(default_factory=dict)   # id -> (want, since)
+    # Predicted entries already announced, and how many polls in a row each
+    # zone has been predicted.
+    predicted: dict = field(default_factory=dict)      # id -> (at, eta_sec)
+    predict_streak: dict = field(default_factory=dict)
+    # The most recent radio mention matched to this aircraft (radio_intel).
+    last_heard: Optional[dict] = None
 
     phase: str = PH_UNKNOWN
     phase_pending: str = ""
@@ -168,6 +189,25 @@ class Track:
 
     def label(self) -> str:
         return self.ident or self.reg or self.hex.upper()
+
+    def roles(self) -> set:
+        out = self.classification.roles()
+        if self.in_emergency or self.squawk in EMERGENCY_SQUAWKS:
+            out.add(airspace.ROLE_EMERGENCY)
+        return out
+
+    @property
+    def in_zone(self) -> bool:
+        return bool(self.zones)
+
+    def heard(self, now: Optional[float] = None) -> Optional[dict]:
+        """last_heard, if it is still fresh enough to be worth showing."""
+        h = self.last_heard
+        if not h:
+            return None
+        if (now or time.time()) - h.get("at", 0) > config.RADIO_HEARD_TTL_SEC:
+            return None
+        return h
 
     def type_label(self) -> str:
         return self.typ or "?"
@@ -203,7 +243,8 @@ class Track:
             )
         return " · ".join(bits)
 
-    def as_dict(self) -> dict:
+    def as_dict(self, zone_names: Optional[dict] = None) -> dict:
+        zone_names = zone_names or {}
         return {
             "hex": self.hex,
             "ident": self.ident,
@@ -225,7 +266,16 @@ class Track:
             "emergency": self.emergency,
             "state": self.state,
             "phase": self.phase,
-            "in_box": self.in_box,
+            "zones": sorted(self.zones),
+            "zone_names": [zone_names.get(z, z) for z in sorted(self.zones)],
+            "in_zone": bool(self.zones),
+            "predicted": {
+                z: {"name": zone_names.get(z, z), "eta_sec": eta, "at": at}
+                for z, (at, eta) in self.predicted.items()
+            },
+            "roles": sorted(self.roles()),
+            "special": bool(self.classification.special),
+            "heard": self.heard(),
             "dist_nm": self.home_dist_nm,
             "bearing": self.home_bearing,
             "military": self.classification.military,
@@ -245,6 +295,11 @@ class Track:
 
 def _now_aest(ts: float) -> str:
     return datetime.fromtimestamp(ts, _TZ).strftime("%H:%M:%S AEST")
+
+
+def roles_label(roles) -> str:
+    """'military · watchlist' — most important first."""
+    return " · ".join(airspace.ROLE_LABELS[r] for r in airspace.ROLES if r in roles)
 
 
 def in_quiet_hours(when: float, spec: str = "") -> bool:
@@ -286,7 +341,7 @@ class _TokenBucket:
     """Caps sustained alert rate while letting a short burst through.
 
     The Discord outbox drains at roughly four messages a second, shared with
-    the transcript feed. An airshow launch is twenty aircraft in three minutes;
+    the transcript feed. A mass departure is twenty aircraft in three minutes;
     without a cap here the ADS-B side would push transcripts down the queue,
     which is the exact failure the outbox exists to prevent.
     """
@@ -320,6 +375,7 @@ class AdsbPoller:
         on_log: Optional[Callable] = None,
         source=None,
         store=None,
+        zones=None,
         clock: Callable[[], float] = time.time,
     ):
         self.stop_event = stop_event or threading.Event()
@@ -346,39 +402,49 @@ class AdsbPoller:
         self.last_mil_sweep_at = 0.0
         self.events_emitted = 0
         self._bucket = _TokenBucket(config.ADSB_MAX_ALERTS_PER_MIN)
+        self._zone_bucket = _TokenBucket(config.AIRSPACE_MAX_ALERTS_PER_MIN)
+        self.predict_enabled = config.AIRSPACE_PREDICT_ENABLED
         self.watch_hex = set(config.ADSB_WATCH_HEX)
         self.watch_callsign = set(config.ADSB_WATCH_CALLSIGN)
-        self._box_poly = config.ADSB_BOX_POLY
-        self._box_poly_out = (
-            geo.inflate_polygon(self._box_poly, config.ADSB_BOX_HYST_NM)
-            if self._box_poly
-            else None
+        if zones is None:
+            zones = airspace.ZoneSet(overrides=self._load_zone_overrides())
+        self.zones = zones
+
+    # -- zones ------------------------------------------------------------
+
+    def _load_zone_overrides(self) -> dict:
+        if self.store is None:
+            return {}
+        try:
+            raw = json.loads(self.store.get_meta("zone_overrides", "{}") or "{}")
+            return {str(k): bool(v) for k, v in raw.items()}
+        except Exception:
+            return {}
+
+    def set_zone_enabled(self, zone_id: str, on: bool) -> bool:
+        """Toggle a zone at runtime; persisted across restarts."""
+        with self._lock:
+            if not self.zones.set_enabled(zone_id, on):
+                return False
+            if not on:
+                zid = self.zones.find(zone_id).id
+                for t in self.tracks.values():
+                    t.zones.discard(zid)
+                    t.zone_pending.pop(zid, None)
+                    t.predicted.pop(zid, None)
+                    t.predict_streak.pop(zid, None)
+        if self.store is not None:
+            self.store.set_meta("zone_overrides", json.dumps(self.zones.overrides))
+        return True
+
+    def zone_names(self) -> dict:
+        return {z.id: z.name for z in self.zones.all()}
+
+    def _anon_zone(self, lat, lon, alt_ft) -> bool:
+        return any(
+            z.anon_signal and z.contains(lat, lon, alt_ft, strict=True)
+            for z in self.zones.active()
         )
-        self._box_out = geo.inflate_bbox(config.ADSB_BOX, config.ADSB_BOX_HYST_NM)
-
-    # -- geometry ---------------------------------------------------------
-
-    def _inside_box(self, lat, lon, alt_ft, strict: bool) -> bool:
-        """strict=True tests the real box; False tests the inflated one.
-
-        Two boundaries make the dead band: a track is only "in" once it clears
-        the inner edge and only "out" once it clears the outer one, so sitting
-        on the line cannot produce an enter/exit stream.
-
-        The box has a ceiling too: an aircraft above ADSB_BOX_CEILING_FT is
-        overflying on the airway, not displaying, so it counts as outside
-        whatever its ground track reads. An unknown altitude is not treated as
-        above the ceiling — we only discard what we can positively place there.
-        """
-        if lat is None or lon is None:
-            return False
-        if alt_ft is not None and alt_ft > config.ADSB_BOX_CEILING_FT:
-            return False
-        if self._box_poly:
-            poly = self._box_poly if strict else self._box_poly_out
-            return geo.point_in_polygon(lat, lon, poly)
-        box = config.ADSB_BOX if strict else self._box_out
-        return geo.point_in_bbox(lat, lon, box)
 
     # -- the state machine ------------------------------------------------
 
@@ -389,6 +455,7 @@ class AdsbPoller:
         clock reads. Everything the tests need to drive is a parameter.
         """
         events: list = []
+        self.zones.reload()
         with self._lock:
             self.polls += 1
             self.last_poll_at = now
@@ -452,7 +519,11 @@ class AdsbPoller:
             pass
 
         events.extend(self._check_emergency(track, now))
-        events.extend(self._check_box(track, now))
+        # A track adopted silently (cold start, or a restart that already knew
+        # it) takes up its current zones silently too, or every restart would
+        # re-announce everything sitting in the CTR.
+        events.extend(self._check_zones(track, now, silent=fresh and track.suppress_appear))
+        events.extend(self._check_predictions(track, now))
         events.extend(self._check_phase(track, now))
         events.extend(self._check_position_update(track, now))
         return events
@@ -489,10 +560,9 @@ class AdsbPoller:
             track.history.append((now, track.home_dist_nm, track.alt_ft))
             track.trail.append((round(rep.lat, 5), round(rep.lon, 5)))
 
-        strict_in = self._inside_box(track.lat, track.lon, track.alt_ft, strict=True)
         track.classification = adsb_classify.classify(
             rep,
-            in_box=strict_in,
+            anon_zone=self._anon_zone(track.lat, track.lon, track.alt_ft),
             watch_hex=self.watch_hex,
             watch_callsign=self.watch_callsign,
         )
@@ -548,56 +618,145 @@ class AdsbPoller:
             )
         ]
 
-    def _check_box(self, track: Track, now: float) -> list:
+    def _check_zones(self, track: Track, now: float, silent: bool = False) -> list:
+        """One Schmitt trigger per zone, with a per-zone dwell.
+
+        Two boundaries make the dead band: a track is only "in" once it clears
+        the zone's real edge and only "out" once it clears the edge grown by
+        hyst_nm, so sitting on the line cannot produce an enter/exit stream.
+        Occupancy is tracked for every aircraft (the board and map show it);
+        events are only minted for the roles the zone cares about.
+        """
+        active = self.zones.active()
+        active_ids = {z.id for z in active}
+        for stale in [z for z in track.zones if z not in active_ids]:
+            track.zones.discard(stale)
+            track.zone_since.pop(stale, None)
         if track.lat is None:
             return []
-        if track.in_box:
-            # Only leaves once clear of the inflated boundary.
-            target = not self._inside_box(track.lat, track.lon, track.alt_ft, strict=False)
+        if silent:
+            for z in active:
+                if z.contains(track.lat, track.lon, track.alt_ft, strict=True):
+                    track.zones.add(z.id)
+                    track.zone_since[z.id] = now
+            return []
+
+        events = []
+        for z in active:
+            inside = z.id in track.zones
+            if inside:
+                flip = not z.contains(track.lat, track.lon, track.alt_ft, strict=False)
+            else:
+                flip = z.contains(track.lat, track.lon, track.alt_ft, strict=True)
+            if not flip:
+                track.zone_pending.pop(z.id, None)
+                continue
+            want = not inside
+            pending = track.zone_pending.get(z.id)
+            if pending is None or pending[0] != want:
+                track.zone_pending[z.id] = (want, now)
+                continue
+            if now - pending[1] < z.dwell_sec:
+                continue
+            track.zone_pending.pop(z.id, None)
+            roles = track.roles()
+            if want:
+                track.zones.add(z.id)
+                track.zone_since[z.id] = now
+                track.predicted.pop(z.id, None)
+                track.predict_streak.pop(z.id, None)
+                if z.wants(roles):
+                    events.append(self._zone_event(EV_ZONE_ENTER, track, z, now, roles))
+            else:
+                since = track.zone_since.pop(z.id, now)
+                track.zones.discard(z.id)
+                # Exits from info-level zones are noise; the board shows them.
+                if z.wants(roles) and (z.severity >= 1 or roles & {"watch", "emergency"}):
+                    events.append(self._zone_event(
+                        EV_ZONE_EXIT, track, z, now, roles, dwell=now - since,
+                    ))
+        return events
+
+    def _zone_event(self, kind, track: Track, zone, now: float, roles: set,
+                    dwell: float = 0.0, eta: Optional[float] = None) -> TrackEvent:
+        who = roles_label(roles)
+        if kind == EV_ZONE_ENTER:
+            headline = f"Entered {zone.name} — {track.label()}"
+            detail = f"{who} · {track.position_text()}"
+            tier = TIER_INTEREST if zone.severity >= 1 or "watch" in roles else TIER_NONE
+        elif kind == EV_ZONE_EXIT:
+            headline = f"Left {zone.name} — {track.label()}"
+            detail = f"inside {dwell / 60:.0f} min · {track.position_text()}"
+            tier = TIER_NONE
         else:
-            target = self._inside_box(track.lat, track.lon, track.alt_ft, strict=True)
-        want = (not track.in_box) if target else track.in_box
+            headline = f"Heading for {zone.name} — {track.label()}"
+            detail = f"{who} · ETA ~{max(1, round((eta or 0) / 60))} min · {track.position_text()}"
+            tier = TIER_INTEREST if zone.severity >= 1 else TIER_NONE
+        if airspace.ROLE_EMERGENCY in roles:
+            tier = max(tier, TIER_INTEREST)
+        return TrackEvent(
+            kind=kind,
+            track=track,
+            at=now,
+            tier=tier,
+            military=track.classification.military,
+            headline=headline,
+            detail=detail,
+            zone_id=zone.id,
+            zone_name=zone.name,
+            roles=tuple(sorted(roles)),
+            eta_sec=eta,
+        )
 
-        if want == track.in_box:
-            track.box_pending = None
-            return []
+    def _check_predictions(self, track: Track, now: float) -> list:
+        """Warn before a flagged aircraft enters a zone, not after.
 
-        # Candidate change — must hold for BOX_DWELL_SEC.
-        if track.box_pending != want:
-            track.box_pending = want
-            track.box_pending_since = now
+        Each zone's projection has to agree for AIRSPACE_PREDICT_CONFIRM_POLLS
+        polls running, and is announced once per approach. A turn away resets
+        it silently, so a later approach can be announced again (subject to the
+        usual cooldown).
+        """
+        if (
+            not self.predict_enabled
+            or track.state != ST_LIVE
+            or track.on_ground
+            or track.lat is None
+            or track.track_deg is None
+            or (track.gs_kt or 0) < config.AIRSPACE_PREDICT_MIN_GS_KT
+        ):
+            track.predict_streak.clear()
             return []
-        if now - track.box_pending_since < config.ADSB_BOX_DWELL_SEC:
+        roles = track.roles()
+        if not roles:
+            track.predict_streak.clear()
+            track.predicted.clear()
             return []
-
-        track.in_box = want
-        track.box_pending = None
-        if want:
-            track.box_since = now
-            return [
-                TrackEvent(
-                    kind=EV_BOX_ENTER,
-                    track=track,
-                    at=now,
-                    tier=TIER_INTEREST,
-                    military=track.classification.military,
-                    headline=f"Entered display box — {track.label()}",
-                    detail=track.position_text(),
-                )
-            ]
-        dwell = now - (track.box_since or now)
-        track.box_since = None
-        return [
-            TrackEvent(
-                kind=EV_BOX_EXIT,
-                track=track,
-                at=now,
-                tier=TIER_NONE,
-                military=track.classification.military,
-                headline=f"Left display box — {track.label()}",
-                detail=f"was in the box {dwell / 60:.0f} min · {track.position_text()}",
+        events = []
+        horizon = config.AIRSPACE_PREDICT_MIN * 60.0
+        for z in self.zones.active():
+            if not z.predict or z.id in track.zones or not z.wants(roles):
+                continue
+            hit = airspace.predict_entry(
+                z, track.lat, track.lon, track.alt_ft, track.gs_kt,
+                track.track_deg, track.baro_rate, horizon, config.AIRSPACE_PREDICT_STEP_SEC,
             )
-        ]
+            # Under one poll out, the entry event itself is about to say it.
+            if hit is None or hit[0] <= config.ADSB_POLL_SEC:
+                track.predict_streak.pop(z.id, None)
+                if hit is None:
+                    track.predicted.pop(z.id, None)
+                continue
+            eta = hit[0]
+            if z.id in track.predicted:
+                track.predicted[z.id] = (track.predicted[z.id][0], eta)
+                continue
+            streak = track.predict_streak.get(z.id, 0) + 1
+            track.predict_streak[z.id] = streak
+            if streak < config.AIRSPACE_PREDICT_CONFIRM_POLLS:
+                continue
+            track.predicted[z.id] = (now, eta)
+            events.append(self._zone_event(EV_ZONE_PREDICT, track, z, now, roles, eta=eta))
+        return events
 
     def _propose_phase(self, track: Track, phase: str) -> bool:
         """Advance the confirm counter; True once the phase should commit."""
@@ -714,7 +873,7 @@ class AdsbPoller:
         if track.state != ST_LIVE:
             return []
         interval = (
-            config.ADSB_POS_UPDATE_SEC_BOX if track.in_box else config.ADSB_POS_UPDATE_SEC
+            config.ADSB_POS_UPDATE_SEC_ZONE if track.zones else config.ADSB_POS_UPDATE_SEC
         )
         due = now - track.last_position_alert_at >= interval
         moved = False
@@ -765,16 +924,22 @@ class AdsbPoller:
                 continue
             if track.state != ST_FADING:
                 continue
-            lost_after = (
-                config.ADSB_LOST_SEC_BOX if track.in_box else config.ADSB_LOST_SEC
-            )
-            if gone < lost_after:
+            if gone < self._lost_after(track):
                 continue
             track.state = ST_LOST
             ev = self._disappeared_event(track, now, gone)
             if ev:
                 events.append(ev)
         return events
+
+    def _lost_after(self, track: Track) -> float:
+        """Zones with patchy low-level coverage call a loss sooner."""
+        best = config.ADSB_LOST_SEC
+        for zid in track.zones:
+            z = self.zones.get(zid)
+            if z is not None and z.lost_sec:
+                best = min(best, z.lost_sec)
+        return best
 
     def _disappeared_event(self, track: Track, now: float, gone: float) -> Optional[TrackEvent]:
         # A target we only ever caught a handful of frames of was never
@@ -831,7 +996,7 @@ class AdsbPoller:
             if ev.tier < TIER_EMERGENCY and not self._passes_gates(ev, now):
                 continue
             if self.store is not None:
-                self.store.mark_alert(ev.hex, ev.kind, now)
+                self.store.mark_alert(ev.hex, ev.alert_key, now)
                 self.store.log_event(ev)
             self.events_emitted += 1
             if self._on_event is not None:
@@ -841,6 +1006,8 @@ class AdsbPoller:
                     self._log(f"ADS-B event handler failed: {exc}", warn=True)
 
     def _passes_gates(self, ev, now: float) -> bool:
+        if ev.kind in ZONE_EVENTS:
+            return self._passes_zone_gates(ev, now)
         if in_quiet_hours(now, config.ADSB_QUIET_HOURS):
             return False
         if (
@@ -855,6 +1022,18 @@ class AdsbPoller:
         ):
             return False
         return self._bucket.take(now)
+
+    def _passes_zone_gates(self, ev, now: float) -> bool:
+        """Zone events are already filtered by role, so no confidence floor."""
+        if in_quiet_hours(now, config.ADSB_QUIET_HOURS) and not (
+            set(ev.roles) & config.AIRSPACE_QUIET_BYPASS_ROLES
+        ):
+            return False
+        if self.store is not None and not self.store.should_alert(
+            ev.hex, ev.alert_key, config.AIRSPACE_EVENT_COOLDOWN_SEC, now
+        ):
+            return False
+        return self._zone_bucket.take(now)
 
     def _log(self, message: str, warn: bool = False) -> None:
         if self._on_log is not None:
@@ -925,22 +1104,26 @@ class AdsbPoller:
     def snapshot(
         self,
         military_only: bool = False,
-        box_only: bool = False,
+        zone: str = "",
+        flagged_only: bool = False,
         airborne_only: bool = True,
         limit: int = 0,
     ) -> list:
+        names = self.zone_names()
         with self._lock:
             rows = []
             for t in self.tracks.values():
                 if t.state == ST_LOST:
                     continue
-                if box_only and not t.in_box:
+                if zone and zone not in t.zones:
                     continue
                 if military_only and not t.classification.interesting:
                     continue
+                if flagged_only and not t.roles():
+                    continue
                 if airborne_only and t.on_ground:
                     continue
-                rows.append(t.as_dict())
+                rows.append(t.as_dict(names))
         rows.sort(key=lambda r: (r["dist_nm"] is None, r["dist_nm"] or 0))
         return rows[:limit] if limit else rows
 
@@ -956,15 +1139,45 @@ class AdsbPoller:
         except Exception:
             return adsb_source.SourceHealth(active="?")
 
+    def zone_summary(self, flagged: Optional[list] = None) -> list:
+        """Per active zone: who flagged is inside, who is inbound, how busy."""
+        if flagged is None:
+            flagged = self.snapshot(flagged_only=True, airborne_only=False)
+        with self._lock:
+            counts: dict = collections.Counter(
+                z for t in self.tracks.values() if t.state != ST_LOST for z in t.zones
+            )
+        out = []
+        for z in self.zones.active():
+            occupants = [r for r in flagged if z.id in r["zones"]]
+            incoming = sorted(
+                (
+                    {"label": r["ident"] or r["reg"] or r["hex"].upper(),
+                     "hex": r["hex"], "eta_sec": r["predicted"][z.id]["eta_sec"]}
+                    for r in flagged if z.id in r["predicted"]
+                ),
+                key=lambda x: x["eta_sec"] or 0,
+            )
+            out.append({
+                "id": z.id, "name": z.name, "color": z.color, "kind": z.kind,
+                "severity": z.severity, "alt": z.alt_text(),
+                "occupants": occupants, "incoming": incoming,
+                "count": counts.get(z.id, 0),
+            })
+        return out
+
     def snapshot_board(self) -> dict:
         with self._lock:
             military = self.snapshot(military_only=True, airborne_only=False)
             everything = self.snapshot(airborne_only=True)
+            flagged = self.snapshot(flagged_only=True, airborne_only=False)
             return {
                 "at": self.last_poll_at,
                 "military": military,
                 "all": everything,
-                "box": [r for r in everything if r["in_box"]],
+                "flagged": flagged,
+                "zoned": [r for r in flagged if r["in_zone"]],
+                "zones": self.zone_summary(flagged),
                 "source": self._source_health().active,
                 "tracks": len(self.tracks),
             }
@@ -982,20 +1195,43 @@ class AdsbPoller:
                 or t.reg.replace("-", "") == needle.replace("-", "")
             ]
 
+    # -- radio correlation (radio_intel) ----------------------------------
+
+    def tracks_near(self, lat: float, lon: float, radius_nm: float) -> list:
+        """Current tracks within radius_nm, as Track objects. Read-only use."""
+        with self._lock:
+            out = []
+            for t in self.tracks.values():
+                if t.state == ST_LOST:
+                    continue
+                if t.lat is None or geo.haversine_nm(lat, lon, t.lat, t.lon) <= radius_nm:
+                    out.append(t)
+            return out
+
+    def note_heard(self, hex_: str, heard: dict) -> Optional[Track]:
+        """Attach a radio mention to a track; returns it, or None if gone."""
+        with self._lock:
+            t = self.tracks.get(hex_)
+            if t is not None:
+                t.last_heard = dict(heard)
+            return t
+
     def health(self) -> dict:
         h = self._source_health()
         with self._lock:
             mil = sum(1 for t in self.tracks.values() if t.classification.military)
-            box = sum(1 for t in self.tracks.values() if t.in_box)
+            zoned = sum(1 for t in self.tracks.values() if t.zones and t.roles())
             return {
                 "enabled": self.enabled,
                 "polls": self.polls,
                 "last_poll_at": self.last_poll_at,
                 "tracks": len(self.tracks),
                 "military": mil,
-                "in_box": box,
+                "in_zone": zoned,
+                "zones": len(self.zones.active()),
+                "zones_error": self.zones.error,
                 "events": self.events_emitted,
-                "suppressed": self._bucket.suppressed,
+                "suppressed": self._bucket.suppressed + self._zone_bucket.suppressed,
                 "source": h.active,
                 "requests": h.requests,
                 "failures": h.failures,
@@ -1117,7 +1353,8 @@ def _summarise_group(members: list, family: str) -> dict:
         "title": next((m.get("title") for m in members if m.get("title")), ""),
         "military": any(m.get("military") for m in members),
         "probable": all(m.get("probable") and not m.get("military") for m in members),
-        "in_box": any(m.get("in_box") for m in members),
+        "in_zone": any(m.get("in_zone") for m in members),
+        "zone_names": sorted({n for m in members for n in m.get("zone_names") or ()}),
         "lat": lat,
         "lon": lon,
         "dist_nm": dist,
@@ -1194,7 +1431,7 @@ def group_formations(
 #
 # --dry-run is the one to use before pointing this at a real Discord channel:
 # it shows exactly what would have been posted, so alert volume can be measured
-# against a live airshow rather than guessed at.
+# against a busy afternoon rather than guessed at.
 
 
 def _print_table(rows: list) -> None:
@@ -1210,12 +1447,14 @@ def _print_table(rows: list) -> None:
         dist = f"{r['dist_nm']:.1f}" if r["dist_nm"] is not None else "?"
         brg = geo.compass_point(r["bearing"]) if r["bearing"] is not None else "?"
         note = []
-        if r["in_box"]:
-            note.append("BOX")
+        if r["zone_names"]:
+            note.append("IN " + "/".join(r["zone_names"]))
         if r["military"]:
             note.append("MIL")
         elif r["probable"]:
             note.append("probable")
+        if r["special"]:
+            note.append("SPECIAL")
         if r["reasons"]:
             note.append(r["reasons"])
         name = r["ident"] or r["reg"] or r["hex"]
@@ -1246,10 +1485,11 @@ def main(argv=None) -> int:
             f"\n{len(reports)} aircraft within {config.ADSB_RADIUS_NM:.0f} nm of "
             f"{config.ADSB_HOME_ICAO} · source {poller.source.health().active}\n"
         )
-        print("MILITARY / DISPLAY")
+        print("MILITARY / PROBABLE")
         _print_table(poller.snapshot(military_only=True, airborne_only=False))
-        print("\nDISPLAY BOX")
-        _print_table(poller.snapshot(box_only=True, airborne_only=False))
+        for z in poller.zones.active():
+            print(f"\n{z.name.upper()} ({z.alt_text()})")
+            _print_table(poller.snapshot(zone=z.id, airborne_only=False))
         print("\nALL AIRBORNE")
         _print_table(poller.snapshot(limit=25))
         print("\nData from adsb.fi — https://adsb.fi")

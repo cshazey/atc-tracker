@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "Spoken radio telephony -> ICAO airline designator, for radio_intel.",
+    "'Qantas four one two' becomes QFA412, which is exactly what that aircraft",
+    "broadcasts as its ADS-B ident - so the radio call can be pinned on a track.",
+    "Keys are matched as whole words, case-insensitively. Multi-word keys are fine.",
+    "special: emergency-service telephony -> ADS-B ident prefixes it may use",
+    "(empty list = match by spoken number against emergency-service tracks only)."
+  ],
+  "airlines": {
+    "QANTAS": "QFA",
+    "QLINK": "QLK",
+    "Q LINK": "QLK",
+    "JETSTAR": "JST",
+    "VELOCITY": "VOZ",
+    "VIRGIN": "VOZ",
+    "REX": "RXA",
+    "UNITY": "UTY",
+    "NEW ZEALAND": "ANZ",
+    "SINGAPORE": "SIA",
+    "EMIRATES": "UAE",
+    "CATHAY": "CPA",
+    "QATARI": "QTR",
+    "AIR CHINA": "CCA",
+    "CHINA EASTERN": "CES",
+    "CHINA SOUTHERN": "CSN",
+    "MALAYSIAN": "MAS",
+    "PHILIPPINE": "PAL",
+    "THAI": "THA",
+    "INDONESIA": "GIA",
+    "AIR INDIA": "AIC",
+    "KOREAN AIR": "KAL",
+    "DYNASTY": "CAL",
+    "EVA": "EVA"
+  },
+  "special": {
+    "POLAIR": ["POLAIR", "POL"],
+    "POLICE": ["POL"],
+    "RESCUE": ["RSCU", "RESCUE"],
+    "LIFEFLIGHT": ["LIFE"],
+    "LIFE FLIGHT": ["LIFE"],
+    "CAREFLIGHT": [],
+    "CARE FLIGHT": [],
+    "FLYDOC": [],
+    "AMBULANCE": []
+  }
+}

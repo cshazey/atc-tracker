@@ -131,6 +131,10 @@ _PROMPT_YBBN = (
 # default URL is built from it via the redirector. The URL can still be
 # overridden without a code change via STREAM_URL_<ICAO> in .env, or at runtime
 # via the Discord /seturl <ICAO> <url> command (see README.md).
+#
+# lat/lon/relevance_nm say where a station's traffic is. A callsign heard on
+# the radio is only matched to an ADS-B track inside that circle, so "Alpha
+# Bravo Charlie" on Brisbane Tower is never pinned on an aircraft at Coolangatta.
 STREAMS = [
     {
         "icao": "YBCG",
@@ -139,18 +143,19 @@ STREAMS = [
         "headers": _HEADERS,
         "prompt": _PROMPT_YBCG,
         "vad_threshold": 0.003,
+        "lat": -28.1644, "lon": 153.5047, "relevance_nm": 90,
     },
     {
         # Gold Coast Ground/Tower. Distinct from the YBCG entry above, which is
         # Brisbane Centre sector audio hosted under a ybcg mount — this is the
-        # aerodrome's own frequencies (121.800 / 118.700) and the pair the
-        # Pacific Airshow display aircraft actually work.
+        # aerodrome's own frequencies (121.800 / 118.700).
         "icao": "YBCG_TWR",
         "name": "Gold Coast Tower",
         "mount": "ybcg3_gnd_twr",
         "headers": _HEADERS,
         "prompt": _PROMPT_YBCG_TWR,
         "vad_threshold": 0.003,
+        "lat": -28.1644, "lon": 153.5047, "relevance_nm": 25,
     },
     {
         "icao": "YSPT",
@@ -159,6 +164,7 @@ STREAMS = [
         "headers": _HEADERS,
         "prompt": _PROMPT_YSPT,
         "vad_threshold": 0.003,
+        "lat": -27.9217, "lon": 153.3714, "relevance_nm": 20,
     },
     {
         "icao": "YBBN",
@@ -167,6 +173,7 @@ STREAMS = [
         "headers": _HEADERS,
         "prompt": _PROMPT_YBBN,
         "vad_threshold": 0.003,
+        "lat": -27.3842, "lon": 153.1175, "relevance_nm": 30,
     },
 ]
 
@@ -294,7 +301,7 @@ KEYWORDS_EMERGENCY = [
 ]
 
 KEYWORDS_INTEREST = [
-    # Military / display types
+    # Military types
     "MILITARY",
     "RAAF",
     "ROULETTE",
@@ -319,14 +326,9 @@ KEYWORDS_INTEREST = [
     "SPITFIRE",
     "MUSTANG",
     "WARBIRD",
-    # Airshow operations
-    "AIRSHOW",
-    "DISPLAY",
     "AEROBATIC",
     "AEROBATICS",
     "FORMATION",
-    "PAUL BENNET",
-    "SKY ACES",
     # Airspace
     "RESTRICTED",
     "COASTAL",
@@ -496,10 +498,10 @@ DISCORD_ENABLED = bool(
 # Live ADS-B tracking (adsb_source / adsb_classify / adsb_tracker)
 #
 # Polls a free community ADS-B feed for aircraft around the Gold Coast, works
-# out which of them are military or airshow display aircraft, and posts events
-# to Discord. Complements the audio side: the radio tells you what was said,
-# this tells you what is actually in the air — including the aircraft that are
-# NOT talking.
+# out which of them are military, emergency-service or otherwise notable, and
+# posts events to Discord. Complements the audio side: the radio tells you what
+# was said, this tells you what is actually in the air — including the aircraft
+# that are NOT talking.
 #
 # Data comes from adsb.fi (https://adsb.fi), which is free, needs no API key,
 # and is licensed for personal non-commercial use only. Two conditions come
@@ -537,26 +539,50 @@ ADSB_HOME_LAT = _num("ADSB_HOME_LAT", -28.1644)
 ADSB_HOME_LON = _num("ADSB_HOME_LON", 153.5047)
 ADSB_HOME_ELEV_FT = _num("ADSB_HOME_ELEV_FT", 21)
 ADSB_HOME_ICAO = _str("ADSB_HOME_ICAO", "YBCG")
-# 60 NM from YBCG reaches RAAF Amberley (52 NM), where the heavy military
-# transits into a Gold Coast airshow originate.
-ADSB_RADIUS_NM = _num("ADSB_RADIUS_NM", 60)
+# 75 NM from YBCG covers RAAF Amberley (52 NM) and the Evans Head range
+# (~62 NM), the two military areas in the default zone set.
+ADSB_RADIUS_NM = _num("ADSB_RADIUS_NM", 75)
 
-# Airshow display box — the offshore strip between Narrowneck and Broadbeach.
-# Either a bbox "lat_min,lat_max,lon_min,lon_max" or a polygon
-# "lat,lon;lat,lon;..."; the polygon wins when both are set.
-ADSB_BOX_BBOX = _str("ADSB_BOX_BBOX", "-28.06,-27.94,153.42,153.52")
-ADSB_BOX_POLYGON = os.environ.get("ADSB_BOX_POLYGON", "")
-ADSB_BOX_MAX_ALT_FT = _num("ADSB_BOX_MAX_ALT_FT", 6000)
-# The box is a volume, not a footprint: an aircraft above this height is
-# overflying on the airway, not displaying, and does not count as inside
-# however its ground track reads. Without a ceiling every airliner routed over
-# the strip triggers a box entry.
-ADSB_BOX_CEILING_FT = _num("ADSB_BOX_CEILING_FT", 10000)
-# Hysteresis: "inside" uses the box, "outside" uses it grown by this much, and
-# between the two the previous state holds. Without it an aircraft orbiting the
-# boundary emits an enter/exit pair every poll.
-ADSB_BOX_HYST_NM = _num("ADSB_BOX_HYST_NM", 0.5)
-ADSB_BOX_DWELL_SEC = _num("ADSB_BOX_DWELL_SEC", 20)
+# ---------------------------------------------------------------------------
+# Airspace zones (airspace.py)
+#
+# Named volumes — Gold Coast CTR, the coastal low-level corridor, Amberley,
+# Evans Head — each with its own floor, ceiling, hysteresis, dwell and the set
+# of aircraft roles that alert on entry. Defined in data/airspace_zones.json so
+# they can be edited live. The shapes are approximations for situational
+# awareness, NOT for navigation; check them against the current AIP/VNC.
+# ---------------------------------------------------------------------------
+AIRSPACE_ZONES_FILE = _str("AIRSPACE_ZONES_FILE", os.path.join(_DATA_DIR, "airspace_zones.json"))
+AIRSPACE_DEFAULT_HYST_NM = _num("AIRSPACE_DEFAULT_HYST_NM", 0.5)
+AIRSPACE_DEFAULT_DWELL_SEC = _num("AIRSPACE_DEFAULT_DWELL_SEC", 20)
+# Separate from ADSB_MAX_ALERTS_PER_MIN so a busy zone cannot starve
+# appearances, and the reverse.
+AIRSPACE_MAX_ALERTS_PER_MIN = _int("AIRSPACE_MAX_ALERTS_PER_MIN", 8)
+AIRSPACE_EVENT_COOLDOWN_SEC = _num("AIRSPACE_EVENT_COOLDOWN_SEC", 900)
+# Roles whose zone alerts still fire during ADSB_QUIET_HOURS.
+AIRSPACE_QUIET_BYPASS_ROLES = frozenset(
+    r.lower() for r in _csv("AIRSPACE_QUIET_BYPASS_ROLES", "watch,emergency")
+)
+
+# Predicted entry: project each flagged track forward along its ground track
+# and vertical rate, and warn when it will enter a zone within this horizon.
+AIRSPACE_PREDICT_ENABLED = _flag("AIRSPACE_PREDICT_ENABLED", "1")
+AIRSPACE_PREDICT_MIN = _num("AIRSPACE_PREDICT_MIN", 5)
+AIRSPACE_PREDICT_STEP_SEC = _num("AIRSPACE_PREDICT_STEP_SEC", 30)
+AIRSPACE_PREDICT_MIN_GS_KT = _num("AIRSPACE_PREDICT_MIN_GS_KT", 60)
+# A single poll's heading can be noise; the projection has to agree this many
+# polls in a row before it is announced.
+AIRSPACE_PREDICT_CONFIRM_POLLS = _int("AIRSPACE_PREDICT_CONFIRM_POLLS", 2)
+
+# An unidentified fast mover (no reg, no type) below this height inside a zone
+# flagged anon_signal is itself a classification signal.
+ADSB_ANON_MAX_ALT_FT = _num("ADSB_ANON_MAX_ALT_FT", _num("ADSB_BOX_MAX_ALT_FT", 6000))
+
+# Backwards compatibility: an .env that still sets the old display box gets it
+# as a zone called "custom". Unset, there is no box at all.
+_LEGACY_BOX_BBOX = os.environ.get("ADSB_BOX_BBOX", "").strip()
+_LEGACY_BOX_POLYGON = os.environ.get("ADSB_BOX_POLYGON", "").strip()
+_LEGACY_BOX_CEILING_FT = _num("ADSB_BOX_CEILING_FT", 10000)
 
 
 def _parse_bbox(raw: str):
@@ -584,8 +610,17 @@ def _parse_polygon(raw: str):
     return pts if len(pts) >= 3 else None
 
 
-ADSB_BOX = _parse_bbox(ADSB_BOX_BBOX) or (-28.06, -27.94, 153.42, 153.52)
-ADSB_BOX_POLY = _parse_polygon(ADSB_BOX_POLYGON)
+def _legacy_box():
+    if _LEGACY_BOX_POLYGON:
+        return _parse_polygon(_LEGACY_BOX_POLYGON)
+    bbox = _parse_bbox(_LEGACY_BOX_BBOX) if _LEGACY_BOX_BBOX else None
+    if not bbox:
+        return None
+    lat_min, lat_max, lon_min, lon_max = bbox
+    return [(lat_min, lon_min), (lat_min, lon_max), (lat_max, lon_max), (lat_max, lon_min)]
+
+
+AIRSPACE_LEGACY_BOX = _legacy_box()
 
 # Presence state machine. See the module docstring in adsb_tracker.py for why
 # each of these is where it is — in short, low aircraft over water sit at the
@@ -596,7 +631,6 @@ ADSB_APPEAR_CONFIRM_POLLS = _int("ADSB_APPEAR_CONFIRM_POLLS", 2)
 ADSB_APPEAR_GAP_MIN = _num("ADSB_APPEAR_GAP_MIN", 30)
 ADSB_FADE_SEC = _num("ADSB_FADE_SEC", 45)
 ADSB_LOST_SEC = _num("ADSB_LOST_SEC", 120)
-ADSB_LOST_SEC_BOX = _num("ADSB_LOST_SEC_BOX", 60)
 ADSB_MIN_SEEN_FOR_LOSS = _int("ADSB_MIN_SEEN_FOR_LOSS", 6)
 ADSB_PRUNE_SEC = _num("ADSB_PRUNE_SEC", 900)
 # Above this altitude a vanished target is reported as "transponder off";
@@ -620,13 +654,13 @@ ADSB_ALERT_MIN_CONFIDENCE = _num("ADSB_ALERT_MIN_CONFIDENCE", 0.60)
 
 # Alert volume control.
 ADSB_EVENT_COOLDOWN_SEC = _num("ADSB_EVENT_COOLDOWN_SEC", 600)
-# Token bucket. An airshow launch is ~20 aircraft in 3 minutes; the Discord
+# Token bucket. A mass departure is ~20 aircraft in 3 minutes; the Discord
 # outbox drains at ~4 msg/s shared with transcripts, so without a cap the
 # ADS-B side would delay the audio side — exactly what the outbox exists to
 # prevent. Emergencies bypass this.
 ADSB_MAX_ALERTS_PER_MIN = _int("ADSB_MAX_ALERTS_PER_MIN", 12)
 ADSB_POS_UPDATE_SEC = _num("ADSB_POS_UPDATE_SEC", 300)
-ADSB_POS_UPDATE_SEC_BOX = _num("ADSB_POS_UPDATE_SEC_BOX", 120)
+ADSB_POS_UPDATE_SEC_ZONE = _num("ADSB_POS_UPDATE_SEC_ZONE", _num("ADSB_POS_UPDATE_SEC_BOX", 120))
 # "22:00-06:00" suppresses non-emergency ADS-B alerts overnight. The live board
 # keeps refreshing regardless. Empty means never quiet.
 ADSB_QUIET_HOURS = os.environ.get("ADSB_QUIET_HOURS", "").strip()
@@ -694,6 +728,38 @@ ADSB_MARKER_SHAPES_FILE = _str(
 
 DISCORD_CHANNEL_MILITARY = os.environ.get("DISCORD_CHANNEL_MILITARY", "")
 DISCORD_CHANNEL_FLIGHTS = os.environ.get("DISCORD_CHANNEL_FLIGHTS", "")
+# #airspace-watch: radio callsign flags, zone entries/exits, predicted entries,
+# the pinned zone board and the daily digest. Falls back to #alerts.
+DISCORD_CHANNEL_AIRSPACE = (
+    os.environ.get("DISCORD_CHANNEL_AIRSPACE", "").strip() or DISCORD_ALERTS_CHANNEL_ID
+)
+
+# ---------------------------------------------------------------------------
+# Radio callsign intelligence (radio_intel.py)
+#
+# Every transcript is mined for callsigns — military, airline, VH- registration
+# and emergency-service — and each one is matched against the live ADS-B
+# picture. Mentions are logged and shown on the map; Discord only hears about
+# them when they matter (see RADIO_FLAG_ROLES).
+# ---------------------------------------------------------------------------
+RADIO_INTEL_ENABLED = _flag("RADIO_INTEL_ENABLED", "1")
+RADIO_AIRLINE_FILE = _str("RADIO_AIRLINE_FILE", os.path.join(_DATA_DIR, "airline_telephony.json"))
+# A callsign matched to a track carrying one of these roles is flagged to
+# #airspace-watch. Strong military callsigns and alert-tier transmissions are
+# always flagged, matched or not.
+RADIO_FLAG_ROLES = frozenset(
+    r.lower() for r in _csv(
+        "RADIO_FLAG_ROLES", "military,probable,watch,special,notable,emergency,anon_fast"
+    )
+)
+RADIO_FLAG_COOLDOWN_SEC = _num("RADIO_FLAG_COOLDOWN_SEC", 300)
+# How long a radio mention stays attached to its track ("last heard …").
+RADIO_HEARD_TTL_SEC = _num("RADIO_HEARD_TTL_SEC", 900)
+RADIO_ATTACH_AUDIO = _flag("RADIO_ATTACH_AUDIO", "1")
+RADIO_ATTACH_MAX_BYTES = _int("RADIO_ATTACH_MAX_BYTES", 8 * 1024 * 1024)
+
+# Daily digest posted to #airspace-watch. Local time, HH:MM; blank disables.
+DIGEST_TIME = os.environ.get("DIGEST_TIME", "21:00").strip()
 
 # Read-only local dashboard. Off by default; see README before binding this to
 # anything other than loopback.
@@ -707,7 +773,10 @@ ADSB_WEB_TOKEN = os.environ.get("ADSB_WEB_TOKEN", "")
 ADSB_ENABLED = bool(
     _ADSB_ON
     and (
-        (DISCORD_ENABLED and (DISCORD_CHANNEL_MILITARY or DISCORD_CHANNEL_FLIGHTS))
+        (DISCORD_ENABLED and (
+            DISCORD_CHANNEL_MILITARY or DISCORD_CHANNEL_FLIGHTS
+            or os.environ.get("DISCORD_CHANNEL_AIRSPACE", "").strip()
+        ))
         or ADSB_WEB_ENABLED
     )
 )
