@@ -1,8 +1,9 @@
-"""SQLite store for ADS-B sightings, alert dedupe, and an event log.
+"""SQLite store for ADS-B sightings, alert dedupe, an event log, and the radio
+callsign log.
 
 The alert dedupe is the point of this module. Until now nothing in this project
 remembered what it had already said across a restart — restart the tracker
-mid-airshow and it would cheerfully re-announce every aircraft it could see.
+mid-afternoon and it would cheerfully re-announce every aircraft it could see.
 ``should_alert``/``mark_alert`` close that gap, and ``last_seen`` lets the
 presence machine tell "this aircraft just switched its transponder on" apart
 from "this process just started".
@@ -23,10 +24,18 @@ import json
 import sqlite3
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
+from zoneinfo import ZoneInfo
 
 import config
+
+
+def _utc_offset_modifier(at: float) -> str:
+    """SQLite datetime modifier shifting UTC to local time, e.g. '+10.00 hours'."""
+    off = datetime.fromtimestamp(at, ZoneInfo(config.TIMEZONE)).utcoffset()
+    return f"{(off.total_seconds() if off else 0) / 3600:+.2f} hours"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sightings (
@@ -66,6 +75,26 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS radio_mentions (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    at        REAL NOT NULL,
+    icao      TEXT NOT NULL DEFAULT '',
+    callsign  TEXT NOT NULL DEFAULT '',
+    kind      TEXT NOT NULL DEFAULT '',
+    hex       TEXT NOT NULL DEFAULT '',
+    ident     TEXT NOT NULL DEFAULT '',
+    flagged   INTEGER NOT NULL DEFAULT 0,
+    text      TEXT NOT NULL DEFAULT '',
+    recording TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_mentions_at ON radio_mentions(at);
+CREATE INDEX IF NOT EXISTS idx_mentions_cs ON radio_mentions(callsign);
+CREATE TABLE IF NOT EXISTS radio_tx (
+    at   REAL NOT NULL,
+    icao TEXT NOT NULL,
+    tier INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tx_at ON radio_tx(at);
 """
 
 
@@ -90,6 +119,9 @@ class AdsbStore:
             # WAL lets the live map read while the poller writes every 10 s.
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
+            if "zone" not in cols:
+                conn.execute("ALTER TABLE events ADD COLUMN zone TEXT NOT NULL DEFAULT ''")
             self._schema_ready = True
         return conn
 
@@ -197,8 +229,9 @@ class AdsbStore:
         try:
             with self._lock, self._connect() as conn:
                 conn.execute(
-                    "INSERT INTO events (at, hex, kind, ident, detail) VALUES (?,?,?,?,?)",
-                    (ev.at, ev.hex, ev.kind, ev.track.ident, ev.detail[:500]),
+                    "INSERT INTO events (at, hex, kind, ident, detail, zone) VALUES (?,?,?,?,?,?)",
+                    (ev.at, ev.hex, ev.kind, ev.track.ident, ev.detail[:500],
+                     getattr(ev, "zone_id", "") or ""),
                 )
         except Exception:
             pass
@@ -208,19 +241,19 @@ class AdsbStore:
             with self._connect() as conn:
                 if hex_:
                     cur = conn.execute(
-                        "SELECT at, hex, kind, ident, detail FROM events "
+                        "SELECT at, hex, kind, ident, detail, zone FROM events "
                         "WHERE hex = ? ORDER BY at DESC LIMIT ?",
                         (hex_.lower(), limit),
                     )
                 else:
                     cur = conn.execute(
-                        "SELECT at, hex, kind, ident, detail FROM events "
+                        "SELECT at, hex, kind, ident, detail, zone FROM events "
                         "ORDER BY at DESC LIMIT ?",
                         (limit,),
                     )
                 return [
-                    {"at": a, "hex": h, "kind": k, "ident": i, "detail": d}
-                    for a, h, k, i, d in cur
+                    {"at": a, "hex": h, "kind": k, "ident": i, "detail": d, "zone": z}
+                    for a, h, k, i, d, z in cur
                 ]
         except Exception:
             return []
@@ -243,6 +276,107 @@ class AdsbStore:
         )
         return dict(zip(keys, row))
 
+    # -- radio ------------------------------------------------------------
+
+    def log_transmission(self, at: float, icao: str, tier: int) -> None:
+        try:
+            with self._lock, self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO radio_tx (at, icao, tier) VALUES (?,?,?)", (at, icao, tier)
+                )
+        except Exception:
+            pass
+
+    def log_mention(self, m: dict) -> None:
+        try:
+            with self._lock, self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO radio_mentions (at, icao, callsign, kind, hex, ident,"
+                    " flagged, text, recording) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (
+                        m.get("at", time.time()), m.get("icao", ""),
+                        m.get("callsign", ""), m.get("kind", ""),
+                        m.get("hex", ""), m.get("ident", ""),
+                        1 if m.get("flagged") else 0,
+                        (m.get("text") or "")[:500], m.get("recording", ""),
+                    ),
+                )
+        except Exception:
+            pass
+
+    def recent_mentions(self, limit: int = 20, callsign: str = "") -> list:
+        """Newest first. ``callsign`` matches as a prefix ("QFA" finds QFA412)."""
+        keys = ("at", "icao", "callsign", "kind", "hex", "ident", "flagged", "text", "recording")
+        sql = ("SELECT at, icao, callsign, kind, hex, ident, flagged, text, recording "
+               "FROM radio_mentions")
+        args: tuple = ()
+        if callsign:
+            needle = callsign.upper().replace("-", "").replace(" ", "")
+            sql += " WHERE REPLACE(callsign, '-', '') LIKE ? OR ident LIKE ?"
+            args = (needle + "%", needle + "%")
+        sql += " ORDER BY at DESC LIMIT ?"
+        try:
+            with self._connect() as conn:
+                return [dict(zip(keys, row)) for row in conn.execute(sql, args + (limit,))]
+        except Exception:
+            return []
+
+    def digest(self, since: float, until: float) -> dict:
+        """Everything the daily digest reports, for the window [since, until)."""
+        out: dict = {
+            "since": since, "until": until, "military": [], "special": 0,
+            "events": {}, "zones": {}, "callsigns": [], "stations": {},
+            "radio_emergencies": 0, "flagged_mentions": 0,
+        }
+        try:
+            with self._connect() as conn:
+                out["military"] = [
+                    {"hex": h, "ident": i, "reg": r, "typ": t, "descr": d}
+                    for h, i, r, t, d in conn.execute(
+                        "SELECT hex, ident, reg, typ, descr FROM sightings "
+                        "WHERE military = 1 AND last_seen >= ? AND first_seen < ? "
+                        "ORDER BY last_seen DESC",
+                        (since, until),
+                    )
+                ]
+                out["events"] = dict(conn.execute(
+                    "SELECT kind, COUNT(*) FROM events WHERE at >= ? AND at < ? GROUP BY kind",
+                    (since, until),
+                ).fetchall())
+                out["zones"] = dict(conn.execute(
+                    "SELECT zone, COUNT(DISTINCT hex) FROM events WHERE kind = 'zone_enter' "
+                    "AND at >= ? AND at < ? GROUP BY zone",
+                    (since, until),
+                ).fetchall())
+                out["callsigns"] = conn.execute(
+                    "SELECT callsign, kind, COUNT(*) AS n FROM radio_mentions "
+                    "WHERE at >= ? AND at < ? AND callsign != '' "
+                    "GROUP BY callsign ORDER BY n DESC, callsign LIMIT 10",
+                    (since, until),
+                ).fetchall()
+                out["flagged_mentions"] = conn.execute(
+                    "SELECT COUNT(*) FROM radio_mentions WHERE at >= ? AND at < ? AND flagged = 1",
+                    (since, until),
+                ).fetchone()[0]
+                stations: dict = {}
+                for icao, n, hour in conn.execute(
+                    "SELECT icao, COUNT(*), CAST(strftime('%H', at, 'unixepoch', ?) AS INTEGER) "
+                    "FROM radio_tx WHERE at >= ? AND at < ? GROUP BY icao, 3",
+                    (_utc_offset_modifier(since), since, until),
+                ):
+                    s = stations.setdefault(icao, {"total": 0, "busiest_hour": None, "peak": 0})
+                    s["total"] += n
+                    if n > s["peak"]:
+                        s["peak"], s["busiest_hour"] = n, hour
+                out["stations"] = stations
+                out["radio_emergencies"] = conn.execute(
+                    "SELECT COUNT(*) FROM radio_tx WHERE at >= ? AND at < ? AND tier >= 2",
+                    (since, until),
+                ).fetchone()[0]
+        except Exception as exc:
+            out["error"] = str(exc)
+        return out
+
     # -- housekeeping -----------------------------------------------------
 
     def prune(self, older_than_days: float = 14.0) -> int:
@@ -251,6 +385,8 @@ class AdsbStore:
             with self._lock, self._connect() as conn:
                 cur = conn.execute("DELETE FROM events WHERE at < ?", (cutoff,))
                 conn.execute("DELETE FROM alerts WHERE last_at < ?", (cutoff,))
+                conn.execute("DELETE FROM radio_mentions WHERE at < ?", (cutoff,))
+                conn.execute("DELETE FROM radio_tx WHERE at < ?", (cutoff,))
                 return cur.rowcount or 0
         except Exception:
             return 0

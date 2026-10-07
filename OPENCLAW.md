@@ -12,8 +12,9 @@ This document explains how the openclaw agent can launch and use the ATC Tracker
 - Saves the transmission audio to `recordings/YYYY-MM-DD/<ICAO>_<HHMMSS>.wav`
 - Sends every transcription to that station's own Discord channel (see `DISCORD.md`)
 - Sends every transcription to the configured Telegram chat when Telegram is enabled
-- Mirrors keyword matches into Discord's `#alerts` channel, in two tiers: emergency terms (MAYDAY, PAN PAN, squawk 7700/7600/7500) ping `@here`; interest terms (display/military callsigns, RESTRICTED, COASTAL) post without a ping
-- Separately tracks live ADS-B aircraft positions around the Gold Coast and posts military/airshow movements to their own channels (see "Live ADS-B tracking" below)
+- Mirrors keyword matches into Discord's `#alerts` channel, in two tiers: emergency terms (MAYDAY, PAN PAN, squawk 7700/7600/7500) ping `@here`; interest terms (military callsigns and types, RESTRICTED, COASTAL) post without a ping
+- Separately tracks live ADS-B aircraft positions around the Gold Coast and posts military/notable movements to their own channels (see "Live ADS-B tracking" below)
+- Joins the two: callsigns heard on the radio are matched to live aircraft, and radio flags, airspace zone entries and predicted entries go to `#airspace-watch` (see "Airspace watch" below)
 
 Currently monitored stations:
 | # | ICAO | Name | LiveATC mount |
@@ -23,7 +24,7 @@ Currently monitored stations:
 | 3 | YSPT | Southport | `yspt2` |
 | 4 | YBBN | Brisbane Tower | `ybbn7_twr` |
 
-`YBCG` and `YBCG_TWR` are different frequencies despite the shared prefix: the first is Brisbane Centre sector audio hosted under a `ybcg` mount, the second is the aerodrome's own ground and tower — the pair airshow display aircraft actually work.
+`YBCG` and `YBCG_TWR` are different frequencies despite the shared prefix: the first is Brisbane Centre sector audio hosted under a `ybcg` mount, the second is the aerodrome's own ground and tower.
 
 Each station connects through LiveATC's redirector (`http://d.liveatc.net/<mount>`), which resolves to whichever edge host currently serves that mount, so ordinary edge rotation no longer breaks a feed. If the redirector is unreachable the tracker falls back through the known edge hosts.
 
@@ -133,7 +134,8 @@ kill <PID>
 - Emergency-tier matches also post to `#alerts` with an `@here` ping; interest-tier matches post there silently
 - Muting/unmuting a station or pausing/resuming the whole tracker (from either platform) posts a status update into that station's Discord channel(s) too
 - Each station channel carries one pinned status message, edited in place on connect/disconnect
-- Independently of the audio, an `adsb-poll` thread queries adsb.fi every 10 s for aircraft within 60 nm of YBCG, classifies them, and posts military/display movements to `#mil-tracker` and Gold Coast Airport movements to `#gc-flights`, plus a pinned live board refreshed every 30 s
+- Independently of the audio, an `adsb-poll` thread queries adsb.fi every 10 s for aircraft within 75 nm of YBCG, classifies them, and posts military/notable movements to `#mil-tracker` and Gold Coast Airport movements to `#gc-flights`, plus a pinned live board refreshed every 30 s
+- Every transcript's callsigns are matched to live aircraft; flagged ones, zone entries and predicted entries go to `#airspace-watch`, which also carries a pinned zone board and a 21:00 daily digest
 
 **Regular call (Telegram):**
 ```
@@ -204,8 +206,7 @@ Keywords are tiered. Both tiers mirror into Discord's `#alerts`; only the emerge
 |---|---|---|---|
 | 🚨 Emergency | Distress | MAYDAY, PAN PAN, EMERGENCY, DISTRESS, FUEL EMERGENCY, GUARD | `@here` |
 | 🚨 Emergency | Squawk codes | SQUAWK 7700/7600/7500, and bare 7700/7600/7500 | `@here` |
-| 🔴 Interest | Military/display types | MILITARY, RAAF, ROULETTES, HORNET, F-18, F/A-18, F-35, GROWLER, WEDGETAIL, POSEIDON, HERCULES, C-130, C-17, GLOBEMASTER, TROJAN, SPITFIRE, MUSTANG, WARBIRD | none |
-| 🔴 Interest | Airshow operations | AIRSHOW, DISPLAY, AEROBATIC(S), FORMATION, PAUL BENNET, SKY ACES | none |
+| 🔴 Interest | Military types | MILITARY, RAAF, ROULETTES, HORNET, F-18, F/A-18, F-35, GROWLER, WEDGETAIL, POSEIDON, HERCULES, C-130, C-17, GLOBEMASTER, TROJAN, SPITFIRE, MUSTANG, WARBIRD, AEROBATIC(S), FORMATION | none |
 | 🔴 Interest | Airspace | RESTRICTED, COASTAL, TEMPORARY RESTRICTED | none |
 
 To add keywords, edit `KEYWORDS_EMERGENCY` / `KEYWORDS_INTEREST` in `config.py`. Matching is whole-word and case-insensitive.
@@ -224,11 +225,11 @@ Runtime: `/military`, `/military on|off`, `/military refresh`, `/military FALCON
 
 ## Live ADS-B tracking
 
-Separate from the audio pipeline and independently switchable. Watches a 60 nm radius around Gold Coast Airport and reports what is actually flying, including aircraft that never key a microphone.
+Separate from the audio pipeline and independently switchable. Watches a 75 nm radius around Gold Coast Airport and reports what is actually flying, including aircraft that never key a microphone.
 
 **Data source.** [adsb.fi](https://adsb.fi), free and keyless, with adsb.lol as automatic failover. Personal non-commercial use only, **attribution required** — it appears on the pinned board and every alert; leave it in place. Published limit is 1 req/s; the poller runs at 0.1 req/s and a single lock covers every request path, so on-demand `/track` lookups cannot burst past the budget either.
 
-**Turning it on.** Create two Discord channels and set `DISCORD_CHANNEL_MILITARY` and `DISCORD_CHANNEL_FLIGHTS` in `.env`. Until at least one is set, `config.ADSB_ENABLED` stays False and no thread starts.
+**Turning it on.** Set `DISCORD_CHANNEL_MILITARY`, `DISCORD_CHANNEL_FLIGHTS` and/or `DISCORD_CHANNEL_AIRSPACE` in `.env` (or `ADSB_WEB_ENABLED=1`). Until one is set, `config.ADSB_ENABLED` stays False and no thread starts.
 
 **Before pointing it at real channels:**
 ```bash
@@ -236,15 +237,17 @@ venv/bin/python adsb_tracker.py --once      # print the current picture, send no
 venv/bin/python adsb_tracker.py --dry-run   # run the loop, print what it would post
 ```
 
-**What it alerts on:** transponder on/off, entering/leaving the offshore airshow display box, YBCG departures and inbounds, emergency squawks, and a live position card per tracked military contact (or formation) that edits in place rather than re-posting.
+**What it alerts on:** transponder on/off, airspace zone entries (to `#airspace-watch`), YBCG departures and inbounds, emergency squawks, and a live position card per tracked military contact (or formation) that edits in place rather than re-posting.
 
-**How it decides something is military.** Not by the feed's military flag alone — that finds almost nothing at an Australian airshow, where display aircraft are civil-registered warbirds. Several weak signals combine as a noisy-OR: the feed flag, ADF/allied hex blocks, the ADF callsign register's ATC-ID prefixes (`TROJ23` → TROJAN), military-only and warbird ICAO types, operator-name keywords, and "unidentified aircraft manoeuvring inside the display box". Weights are in `adsb_classify.WEIGHTS`; the type and hex tables are JSON under `data/` and are re-read when their mtime changes, so you can add a type without restarting.
+**How it decides something is military.** Not by the feed's military flag alone — that finds almost nothing over the Gold Coast, where ex-military types are civil-registered warbirds. Several weak signals combine as a noisy-OR: the feed flag, ADF/allied hex blocks, the ADF callsign register's ATC-ID prefixes (`TROJ23` → TROJAN), military-only and warbird ICAO types, operator-name keywords, and "unidentified aircraft manoeuvring low inside an `anon_signal` zone". Emergency-service and government aircraft are a separate `special` role (`special_role` in `data/adsb_types.json`). Weights are in `adsb_classify.WEIGHTS`; the type and hex tables are JSON under `data/` and are re-read when their mtime changes, so you can add a type without restarting.
 
-**How it avoids alert storms.** Presence is a four-state machine (`SEEDING → LIVE → FADING → LOST`) and alerts fire only on `SEEDING→LIVE` and `FADING→LOST`. Aircraft low over water flicker in and out of receiver coverage constantly; the FADING state absorbs that silently. Plus: a cold-start seeding window, a 30-minute re-appearance gap, a Schmitt trigger on box occupancy, a per-`(aircraft, event)` cooldown persisted in `data/adsb_state.db` so restarts do not replay, and a 12/min token bucket so ADS-B traffic cannot starve transcripts out of the shared Discord outbox.
+**How it avoids alert storms.** Presence is a four-state machine (`SEEDING → LIVE → FADING → LOST`) and alerts fire only on `SEEDING→LIVE` and `FADING→LOST`. Aircraft low over water flicker in and out of receiver coverage constantly; the FADING state absorbs that silently. Plus: a cold-start seeding window, a 30-minute re-appearance gap, a Schmitt trigger per zone, a per-`(aircraft, event)` cooldown persisted in `data/adsb_state.db` so restarts do not replay, and token buckets (12/min ADS-B, 8/min zones) so ADS-B traffic cannot starve transcripts out of the shared Discord outbox.
 
-**Live cards + formations.** On top of the above, a tracked military contact no longer gets a fresh post per position update — the source of the "sixteen notifications for two KC-30As" complaint. Instead `_AdsbLiveCards` (in `atc_tracker.py`, driven from the board snapshot) opens ONE Discord message per contact, edits it in place as the aircraft moves, and finalises it to a last-known state when the contact leaves. Same-type aircraft flying together — the six Roulettes PC-21s, a pair of KC-30As — are consolidated into a single card by `adsb_tracker.group_formations()` (a pure, tested function: same type, within `ADSB_FORMATION_RADIUS_NM`, inside a shared altitude band). With cards on, the state machine stops minting `EV_POSITION` (`emit_position_events=False`) and Telegram mirrors only emergencies, box entries and first appearances. All tunable via `ADSB_LIVE_CARDS_*` / `ADSB_FORMATION_*`.
+**Live cards + formations.** On top of the above, a tracked military contact no longer gets a fresh post per position update — the source of the "sixteen notifications for two KC-30As" complaint. Instead `_AdsbLiveCards` (in `atc_tracker.py`, driven from the board snapshot) opens ONE Discord message per contact, edits it in place as the aircraft moves, and finalises it to a last-known state when the contact leaves. Same-type aircraft flying together — the six Roulettes PC-21s, a pair of KC-30As — are consolidated into a single card by `adsb_tracker.group_formations()` (a pure, tested function: same type, within `ADSB_FORMATION_RADIUS_NM`, inside a shared altitude band). With cards on, the state machine stops minting `EV_POSITION` (`emit_position_events=False`) and Telegram mirrors only emergencies, interest-level zone entries and first appearances. All tunable via `ADSB_LIVE_CARDS_*` / `ADSB_FORMATION_*`.
 
-**Files:** `adsb_source.py` (HTTP, rate limit, failover) · `adsb_classify.py` (pure classifier) · `adsb_tracker.py` (state machine + poll thread + `group_formations()`; `poll_once()` is the pure, testable core) · `adsb_store.py` (SQLite) · `adsb_web.py` (optional map — flight-path trails, live ATC transcript panel, and a recent-activity feed) · `geo.py`. Tests: `venv/bin/python test_adsb.py` — no network, no threads, no writes outside a temp dir.
+**Airspace watch.** `airspace.py` loads named zones from `data/airspace_zones.json` (Gold Coast CTR, coastal corridor, 30 nm area, Amberley, Evans Head; Brisbane and Archerfield off by default — approximate shapes, not for navigation). Each zone lists the roles that alert on entry (`military`, `probable`, `watch`, `emergency`, `special`, `notable`, `anon_fast`). Flagged tracks are dead-reckoned forward and get a predicted-entry warning up to 5 minutes out. `radio_intel.py` extracts callsigns from every transcript (military via the ADF register, airline telephony from `data/airline_telephony.json`, VH- registrations, emergency services) and matches each to a track near the station that heard it; matches are logged to `radio_mentions` in `data/adsb_state.db` and shown as "last heard" on cards, `/track` and the map. Commands: `/zones`, `/zone <id>`, `/zone on|off <id>`, `/predict on|off`, `/heard <callsign>`, `/digest`. Tests: `venv/bin/python test_airspace.py` and `venv/bin/python test_radio_intel.py`.
+
+**Files:** `adsb_source.py` (HTTP, rate limit, failover) · `adsb_classify.py` (pure classifier) · `adsb_tracker.py` (state machine + poll thread + `group_formations()`; `poll_once()` is the pure, testable core) · `adsb_store.py` (SQLite) · `adsb_web.py` (optional map — airspace zones, role colours, 3-minute vectors, flight-path trails, live ATC transcript panel with callsign links, a watch feed and a recent-activity feed) · `airspace.py` · `radio_intel.py` · `geo.py`. Tests: `venv/bin/python test_adsb.py` — no network, no threads, no writes outside a temp dir.
 
 **Map.** `ADSB_WEB_ENABLED=1` serves a live map on port `8099`. Read-only (GET/HEAD only, no filesystem serving). Aircraft draw as their real type silhouette, rotated to track, using tar1090's shape set in `data/adsb_marker_shapes.json` — **that file is GPL-2.0-or-later**, unlike the rest of the repo; the notice is inside it. `ADSB_WEB_BIND=tailscale` (the default in `.env.example`) listens on this host's `100.64/10` Tailnet address **and** loopback — reachable from your phone, invisible to the local network. The address is detected at startup by scanning the interfaces, so the Mac mini resolves its own; both URLs are printed by `run.command`, logged in the terminal, and posted to `#commands` when the tracker starts. `0.0.0.0` still works, with a warning; `ADSB_WEB_TOKEN` adds a shared secret on top.
 

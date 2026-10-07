@@ -2,17 +2,17 @@
   "_comment": [
     "ICAO type designators and operator-name keywords used by adsb_classify.",
     "Edit freely — the classifier reloads this file when its mtime changes, so",
-    "you can add a type mid-airshow without restarting.",
+    "you can add a type without restarting.",
     "",
-    "Three tiers, because 'military' and 'interesting at an airshow' are not",
+    "Three tiers, because 'military' and 'interesting to see' are not",
     "the same question:",
     "  military  — in service with an air arm somewhere. Strong signal.",
     "  warbird   — ex-military airframe now on a civil register. This is what",
-    "              actually flies at Australian airshows: L-39s, Jet Provosts,",
-    "              a P-40 Kittyhawk was overhead Surfers as this was written.",
+    "              actually flies over the Gold Coast: L-39s, Jet Provosts,",
+    "              P-40 Kittyhawks, Spitfires.",
     "  aerobatic — purpose-built display types. Weak on their own (a Pitts",
     "              doing weekend circuits is not news); meaningful when they",
-    "              turn up inside the display box or with a display operator.",
+    "              turn up low inside an anon_signal zone or with a display operator.",
     "",
     "Type codes are matched exactly against the feed's 't' field, uppercased."
   ],
@@ -61,5 +61,26 @@
     "PERFORMANCE AERO", "PAUL BENNET", "SKY ACES", "RUSSIAN ROOLETTES",
     "TEMORA AVIATION", "HARS", "PACIFIC AIRSHOW", "AIR AFFAIRS",
     "BORDER FORCE", "CUSTOMS"
-  ]
+  ],
+
+  "special_role": {
+    "_comment": [
+      "Emergency-service and government aircraft. Not military, and not a",
+      "confidence signal - they get their own 'special' role, which airspace",
+      "zones can alert on. Operator keywords are substrings of the feed's",
+      "ownOp field; ident prefixes are exact prefixes of the ADS-B callsign.",
+      "A starting list - extend it with what you actually see locally."
+    ],
+    "operator_keywords": [
+      "POLICE", "LIFEFLIGHT", "LIFE FLIGHT", "CAREFLIGHT", "CARE FLIGHT",
+      "ROYAL FLYING DOCTOR", "FLYING DOCTOR", "AMBULANCE", "AIR AMBULANCE",
+      "RESCUE", "SURF LIFE SAVING", "FIRE AND RESCUE", "FIRE & RESCUE",
+      "FIRE AND EMERGENCY", "EMERGENCY SERVICES", "STATE EMERGENCY",
+      "BORDER FORCE", "CUSTOMS", "MARITIME SAFETY", "AMSA",
+      "GOVERNMENT AIR WING", "QUEENSLAND GOVERNMENT", "NSW GOVERNMENT"
+    ],
+    "ident_prefixes": [
+      "POLAIR", "POL", "RSCU", "RESCUE", "LIFE"
+    ]
+  }
 }

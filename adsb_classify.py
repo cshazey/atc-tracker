@@ -1,24 +1,29 @@
-"""Decide whether an ADS-B contact is military or an airshow display aircraft.
+"""Decide what kind of aircraft an ADS-B contact is: military, emergency
+service, notable, or none of the above.
 
 Why this is not a one-liner
 ---------------------------
 The obvious approach is ``dbFlags & 1`` — the feed's own military flag. It does
-not work for this use case. Sampled live over the Gold Coast during the Pacific
-Airshow, a 250 NM sweep found exactly one flagged aircraft, 150 NM inland,
-while the display box held:
+not work here. Sampled live over the Gold Coast during the August 2026
+Pacific Airshow, a 250 NM sweep found exactly one flagged aircraft, 150 NM
+inland, while the offshore display area held:
 
     T63     no registration, no type, 1225 ft, 242 kt, squawk 1756
     VH-SIC  L-39 Albatros,   operator PERFORMANCE AERO PTY LTD, dbFlags 8
     VH-JPV  BAC Jet Provost, operator POVAIR PTY LTD
-    VH-AK4  P-40 Kittyhawk,  1200 ft, 176 kt, overhead the box
+    VH-AK4  P-40 Kittyhawk,  1200 ft, 176 kt
 
-None of them carry the military flag. Display aircraft at an Australian airshow
+None of them carry the military flag. Ex-military types over the Gold Coast
 are overwhelmingly civil-registered warbirds, and the genuinely interesting one
 is often an airframe no database has ever seen.
 
 So the classifier combines several weak signals instead of trusting one strong
 one. Confidence is a noisy-OR: ``1 - prod(1 - w)``. Two independent mediocre
 signals therefore beat one mediocre signal, and nothing can exceed 1.0.
+
+Emergency-service and government aircraft (police, rescue, medevac, border
+force) are a separate axis: ``Classification.special``. They are not military
+and contribute no confidence, but airspace zones can still alert on them.
 
 Performance contract
 --------------------
@@ -51,7 +56,7 @@ SIG_TYPE_MIL = "type_mil"
 SIG_TYPE_WARBIRD = "type_warbird"
 SIG_TYPE_AEROBATIC = "type_aerobatic"
 SIG_OPERATOR = "operator"
-SIG_ANON_BOX = "anon_box"
+SIG_ANON_ZONE = "anon_zone"
 
 # Weights. See the module docstring for the reasoning; the short version is
 # that anything at or above ADSB_MIL_CONFIDENCE (0.60) alerts on its own, and
@@ -68,9 +73,9 @@ WEIGHTS = {
     # registry prefixes). Deliberately below the alert threshold so it can
     # never fire alone.
     SIG_CALLSIGN_WEAK: 0.45,
-    SIG_ANON_BOX: 0.40,
+    SIG_ANON_ZONE: 0.40,
     # A Pitts doing weekend circuits is not news. Only interesting alongside
-    # the display box or a display operator.
+    # an anon_signal zone or a display operator.
     SIG_TYPE_AEROBATIC: 0.30,
 }
 
@@ -106,13 +111,46 @@ class Classification:
     probable: bool = False
     signals: tuple = ()
     title: str = ""
+    # Emergency-service / government match, e.g. "operator matches “POLICE”".
+    special: str = ""
 
     def reason_text(self) -> str:
-        return " · ".join(s.label for s in self.signals)
+        bits = [s.label for s in self.signals]
+        if self.special:
+            bits.append(self.special)
+        return " · ".join(bits)
 
     @property
     def interesting(self) -> bool:
         return self.military or self.probable
+
+    def has(self, code: str) -> bool:
+        return any(s.code == code for s in self.signals)
+
+    @property
+    def notable(self) -> bool:
+        return self.has(SIG_TYPE_WARBIRD) or self.has(SIG_TYPE_AEROBATIC)
+
+    def roles(self) -> set:
+        """The airspace roles this classification alone implies.
+
+        Strings rather than airspace.ROLE_* to keep this module free of an
+        import cycle; they are the same values.
+        """
+        out = set()
+        if self.military:
+            out.add("military")
+        elif self.probable:
+            out.add("probable")
+        if self.has(SIG_WATCHLIST):
+            out.add("watch")
+        if self.special:
+            out.add("special")
+        if self.notable:
+            out.add("notable")
+        if self.has(SIG_ANON_ZONE):
+            out.add("anon_fast")
+        return out
 
 
 NOT_INTERESTING = Classification()
@@ -137,9 +175,9 @@ def _load_json(path: str):
 def load_tables(force: bool = False) -> None:
     """Load (or reload) the hex-block and type tables.
 
-    Reloads when a file's mtime changes so the lists can be edited live — at an
-    airshow you want to add a type designator without restarting a process that
-    takes a minute to warm up its Whisper model.
+    Reloads when a file's mtime changes so the lists can be edited live — you
+    want to add a type designator without restarting a process that takes a
+    minute to warm up its Whisper model.
     """
     global _hex_blocks, _types
     with _tables_lock:
@@ -171,12 +209,19 @@ def load_tables(force: bool = False) -> None:
         _hex_blocks = sorted(blocks, key=lambda b: b.start)
 
         raw = _load_json(config.ADSB_TYPES_FILE) or {}
+        special = raw.get("special_role") or {}
         _types = {
             "military": frozenset(t.upper() for t in raw.get("military", [])),
             "warbird": frozenset(t.upper() for t in raw.get("warbird", [])),
             "aerobatic": frozenset(t.upper() for t in raw.get("aerobatic", [])),
             "operators": tuple(
                 k.upper() for k in raw.get("operator_keywords", []) if k.strip()
+            ),
+            "special_operators": tuple(
+                k.upper() for k in special.get("operator_keywords", []) if k.strip()
+            ),
+            "special_prefixes": frozenset(
+                k.upper() for k in special.get("ident_prefixes", []) if k.strip()
             ),
         }
         _classify_cache.clear()
@@ -254,6 +299,20 @@ def _operator_hit(owner: str) -> str:
     return ""
 
 
+def special_role(ident: str, owner: str) -> str:
+    """Why this looks like an emergency-service/government aircraft, or ""."""
+    tables = _tables()
+    prefix, number = split_ident(ident)
+    # Needs the number: a bare "POL" is VH-POL's registration suffix.
+    if prefix and number and prefix in tables["special_prefixes"]:
+        return f"callsign {prefix} → emergency services"
+    upper = (owner or "").upper()
+    for keyword in tables["special_operators"]:
+        if keyword in upper:
+            return f"operator matches “{keyword}” (emergency services / government)"
+    return ""
+
+
 # --- the classifier --------------------------------------------------------
 
 _classify_cache: dict = {}
@@ -269,8 +328,12 @@ def _combine(weights) -> float:
     return 1.0 - remainder
 
 
-def classify(rep, *, in_box: bool = False, watch_hex=(), watch_callsign=()) -> Classification:
-    """Classify one AircraftReport. Memoised on aircraft identity."""
+def classify(rep, *, anon_zone: bool = False, watch_hex=(), watch_callsign=()) -> Classification:
+    """Classify one AircraftReport. Memoised on aircraft identity.
+
+    anon_zone: the contact is inside a zone flagged anon_signal, where an
+    unidentified fast mover is itself suspicious.
+    """
     key = (
         rep.hex,
         rep.ident,
@@ -278,14 +341,14 @@ def classify(rep, *, in_box: bool = False, watch_hex=(), watch_callsign=()) -> C
         rep.reg,
         rep.owner,
         rep.dbflags,
-        in_box,
+        anon_zone,
     )
     with _cache_lock:
         hit = _classify_cache.get(key)
     if hit is not None:
         return hit
 
-    result = _classify_uncached(rep, in_box, watch_hex, watch_callsign)
+    result = _classify_uncached(rep, anon_zone, watch_hex, watch_callsign)
 
     with _cache_lock:
         # Identities are stable, so this only grows with distinct aircraft
@@ -296,7 +359,7 @@ def classify(rep, *, in_box: bool = False, watch_hex=(), watch_callsign=()) -> C
     return result
 
 
-def _classify_uncached(rep, in_box, watch_hex, watch_callsign) -> Classification:
+def _classify_uncached(rep, anon_zone, watch_hex, watch_callsign) -> Classification:
     load_tables()
     tables = _tables()
     signals = []
@@ -344,21 +407,25 @@ def _classify_uncached(rep, in_box, watch_hex, watch_callsign) -> Classification
     if keyword:
         add(SIG_OPERATOR, f"operator matches “{keyword}”")
 
-    # The T63 case: an aircraft manoeuvring inside the display box that no
+    # The T63 case: an aircraft manoeuvring low inside a watched zone that no
     # database has heard of. Requires movement so a parked or drifting
     # position-only contact does not qualify.
     if (
-        in_box
+        anon_zone
         and not rep.reg
         and not rep.typ
         and not rep.on_ground
-        and (rep.alt_ft is None or rep.alt_ft < config.ADSB_BOX_MAX_ALT_FT)
+        and (rep.alt_ft is None or rep.alt_ft < config.ADSB_ANON_MAX_ALT_FT)
         and (rep.gs_kt or 0) > 60
     ):
-        add(SIG_ANON_BOX, "unidentified aircraft manoeuvring in the display box")
+        add(SIG_ANON_ZONE, "unidentified aircraft manoeuvring low in a watched zone")
 
-    if not signals:
+    special = special_role(rep.ident, rep.owner)
+
+    if not signals and not special:
         return NOT_INTERESTING
+    if not signals:
+        return Classification(special=special, title=rep.descr or typ or "")
 
     confidence = _combine(s.weight for s in signals)
     if rep.descr:
@@ -376,6 +443,7 @@ def _classify_uncached(rep, in_box, watch_hex, watch_callsign) -> Classification
         probable=config.ADSB_PROBABLE_CONFIDENCE <= confidence < config.ADSB_MIL_CONFIDENCE,
         signals=tuple(signals),
         title=title,
+        special=special,
     )
 
 

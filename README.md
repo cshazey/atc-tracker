@@ -10,7 +10,7 @@ Currently monitoring:
 
 Detects each radio call via voice activity detection, transcribes it with a local model, records the audio, logs it to the terminal, and forwards every transmission to Discord and/or Telegram (dual-send — both can run at once).
 
-Alerts are two-tier: **emergency** terms (MAYDAY, PAN PAN, squawk 7700/7600/7500) ping `@here` in `#alerts`; **interest** terms (display and military callsigns, RESTRICTED, COASTAL) post to `#alerts` without a ping. Both are highlighted in red in the terminal.
+Alerts are two-tier: **emergency** terms (MAYDAY, PAN PAN, squawk 7700/7600/7500) ping `@here` in `#alerts`; **interest** terms (military callsigns and types, RESTRICTED, COASTAL) post to `#alerts` without a ping. Both are highlighted in red in the terminal.
 
 Every transcript is also checked against a [scraped register of ADF callsigns](#military-callsign-detection), so "Falcon one one" is flagged as a 6 SQN Growler without anyone having to add FALCON to a keyword list.
 
@@ -321,17 +321,18 @@ A scrape that returns fewer than `MILITARY_MIN_SCRAPE_ROWS` (300) rows is treate
 
 ## Live ADS-B tracking
 
-The audio side tells you what is being *said*. This tells you what is actually in the air — including the aircraft that are saying nothing. It watches a 60 NM radius around Gold Coast Airport, works out which contacts are military or airshow display aircraft, and posts to Discord: transponders coming on and going off, the offshore airshow display box, YBCG arrivals and departures, and emergency squawks.
+The audio side tells you what is being *said*. This tells you what is actually in the air — including the aircraft that are saying nothing. It watches a 75 NM radius around Gold Coast Airport, works out which contacts are military, emergency-service or otherwise notable, and posts to Discord: transponders coming on and going off, entries into named airspace zones, YBCG arrivals and departures, and emergency squawks.
 
 Data comes from [adsb.fi](https://adsb.fi) — free, no API key, no signup — with [adsb.lol](https://api.adsb.lol) as automatic failover. **adsb.fi is licensed for personal, non-commercial use and requires attribution**, which appears on the pinned board and in every alert. The published limit is 1 request/second; this polls once every 10 seconds, and a single lock covers every request path including on-demand `/track` lookups, so nothing can burst past it.
 
 ### Setup
 
-Create two Discord channels, put their IDs in `.env`, and restart:
+Create the Discord channels, put their IDs in `.env`, and restart:
 
 ```bash
 DISCORD_CHANNEL_MILITARY=      # #mil-tracker
 DISCORD_CHANNEL_FLIGHTS=       # #gc-flights
+DISCORD_CHANNEL_AIRSPACE=      # #airspace-watch (falls back to #alerts)
 ```
 
 Before pointing it at a real channel, see what it would actually post:
@@ -344,7 +345,7 @@ That prints the current classified picture and sends nothing. `--dry-run` runs t
 
 ### Why the classifier is not just "is it flagged military"
 
-The feed carries a military flag (`dbFlags`). Relying on it alone does not work here. Sampled live over the Gold Coast during the Pacific Airshow, a 250 NM sweep found exactly **one** flagged aircraft, 150 NM inland — while the display box held a P-40 Kittyhawk, an L-39 Albatros, a Jet Provost, and an aircraft with no registration and no type in any database, doing 242 knots at 1,200 feet. None of them were flagged. Display aircraft at Australian airshows are overwhelmingly civil-registered warbirds.
+The feed carries a military flag (`dbFlags`). Relying on it alone does not work here. Sampled live over the Gold Coast during the August 2026 Pacific Airshow, a 250 NM sweep found exactly **one** flagged aircraft, 150 NM inland — while the offshore display area held a P-40 Kittyhawk, an L-39 Albatros, a Jet Provost, and an aircraft with no registration and no type in any database, doing 242 knots at 1,200 feet. None of them were flagged. Ex-military types over the Gold Coast are overwhelmingly civil-registered warbirds.
 
 So several weak signals are combined instead, with confidence as a noisy-OR:
 
@@ -356,8 +357,10 @@ So several weak signals are combined instead, with confidence as a noisy-OR:
 | Callsign prefix in the ADF register (`TROJ23` → TROJAN) | 0.80 |
 | Military-only ICAO type (F35, C17, C130, P8, PC21…) | 0.70 |
 | Warbird type (L39, JPRO, P40, SPIT, T6…) | 0.55 |
-| Registered operator matches a display/defence keyword | 0.45 |
-| Unidentified aircraft manoeuvring inside the display box | 0.40 |
+| Registered operator matches a warbird/defence keyword | 0.45 |
+| Unidentified aircraft manoeuvring low inside an `anon_signal` zone | 0.40 |
+
+Emergency-service and government aircraft (police, rescue, medevac, border force) are a separate axis: they are matched by operator name and callsign prefix (`special_role` in `data/adsb_types.json`), contribute no military confidence, and carry the `special` role that airspace zones can alert on.
 
 Two mediocre signals therefore outrank one. Every alert carries the reasons it fired, so a bad rule is visible in the message rather than something to go hunting for in the code. The type and operator lists live in `data/adsb_types.json` and the hex ranges in `data/adsb_hex_blocks.json` — both are re-read when their modification time changes, so you can add a type mid-event without restarting.
 
@@ -379,25 +382,66 @@ Presence is therefore a four-state machine:
 
 **Alerts fire on exactly two transitions: `SEEDING→LIVE` and `FADING→LOST`.** The intermediate ones are silent, so a flickering target oscillates between LIVE and FADING and says nothing, while a real transponder shutdown walks all the way to LOST and reports once. `test_adsb.py` pins this down: an aircraft alternating present/absent every single poll for five minutes must emit zero events.
 
-The same idea runs through the rest. The display box uses a Schmitt trigger — you are "in" at the boundary but only "out" 0.5 NM beyond it — so orbiting the edge cannot chatter. Phase changes need two consecutive confirmations. A loss above 5,000 ft is reported as "transponder off" and below it as the softer "signal lost", because low-level coverage over water genuinely is unreliable and the alert should not claim more than it knows. Alert history lives in `data/adsb_state.db`, so restarting mid-event does not replay everything you have already been told.
+The same idea runs through the rest. Each airspace zone uses a Schmitt trigger — you are "in" at the boundary but only "out" 0.5 NM beyond it — so orbiting the edge cannot chatter. Phase changes need two consecutive confirmations. A loss above 5,000 ft is reported as "transponder off" and below it as the softer "signal lost", because low-level coverage over water genuinely is unreliable and the alert should not claim more than it knows. Alert history lives in `data/adsb_state.db`, so restarting mid-event does not replay everything you have already been told.
 
 Turn the volume down further with `ADSB_QUIET_HOURS`, `ADSB_CIVIL_REPORTING=mil_only`, or by raising `ADSB_LOST_SEC`. Disable entirely with `ADSB_ENABLED=0`, `--no-adsb`, or `/adsb off`.
 
 ### Commands
 
-`/air` what is airborne · `/mil` military and display only · `/box` who is in the display box · `/track VH-SIC` detail on one aircraft, falling back to a live lookup if it is out of range · `/watch` and `/unwatch` · `/adsb` poller health.
+`/air` what is airborne · `/mil` military and probable military only · `/track VH-SIC` detail on one aircraft, falling back to a live lookup if it is out of range · `/watch` and `/unwatch` · `/adsb` poller health. Zone, radio and digest commands are under [Airspace watch](#airspace-watch).
 
 > Note: `/mil` now means "what military is airborne". The callsign register is `/military`, which is otherwise unchanged.
 
+### Airspace watch
+
+The radio and the ADS-B picture meet here, in one channel: `#airspace-watch` (`DISCORD_CHANNEL_AIRSPACE`, falling back to `#alerts`).
+
+**Zones.** `data/airspace_zones.json` defines named volumes, each with its own floor, ceiling, hysteresis, dwell, colour and — the important part — the aircraft *roles* that alert on entry:
+
+| Zone | Default triggers |
+|---|---|
+| Gold Coast CTR (10 nm, SFC–4,500 ft) | every role |
+| Gold Coast coastal corridor (Southport Spit to Point Danger, below 2,000 ft) | every role; an unidentified fast mover here is itself suspicious |
+| Gold Coast area (30 nm, below FL180) | military, watchlist, emergency |
+| RAAF Amberley | watchlist, emergency, emergency services, notable types |
+| Evans Head weapons range | military, probable, watchlist, emergency, notable |
+| Brisbane / Archerfield CTRs | off by default |
+
+Roles are `military`, `probable`, `watch`, `emergency`, `special` (police/rescue/medevac/government), `notable` (warbird and aerobatic types) and `anon_fast`. Occupancy is tracked for every aircraft; only the roles a zone lists raise an alert. **The shapes are approximations for situational awareness, not for navigation** — check them against the current AIP/VNC and edit the file; it is re-read live. An old `.env` that still sets `ADSB_BOX_BBOX`/`ADSB_BOX_POLYGON` gets that box as a zone called `custom`.
+
+**Predicted entry.** Every flagged track is dead-reckoned forward along its ground track and vertical rate. When it will enter a zone within `AIRSPACE_PREDICT_MIN` (5) minutes — and two polls in a row agree — you get a ⏱️ *Heading for Gold Coast CTR, ETA ~3 min* before it gets there. Turning away cancels it silently.
+
+**Radio callsigns.** Every transcript is mined for callsigns and each one is matched to a live track near the station that heard it:
+
+| Heard | Becomes | Matched to |
+|---|---|---|
+| "Wolf two one" | `WOLF21` | ADS-B ident `WOLF21` via the ADF register |
+| "Qantas six thirty two" | `QFA632` | ident `QFA632` (`data/airline_telephony.json`) |
+| "Victor Hotel Alpha Bravo Charlie", "VH-ABC", or "Gold Coast Tower, Alpha Bravo Charlie" | `VH-ABC` | registration or ident `ABC` |
+| "Rescue five hundred" | `RESCUE500` | emergency-service ident |
+
+A match stays attached to the aircraft for 15 minutes, so its zone alerts, live card, `/track` and map popup all show *📻 last heard on YBCG_TWR 2 min ago: “…”*. A callsign is **flagged** to `#airspace-watch` — with the transcript, the matched aircraft's type, position, zones and roles, and the audio clip attached — when it is a strong military callsign, sits in an alert-tier transmission, or belongs to an aircraft carrying one of `RADIO_FLAG_ROLES`. Taxiway routes and ATIS letters are never read as registrations, two equally good matches count as none, and each `(callsign, station)` pair is rate-limited to once per 5 minutes.
+
+**Zone board and digest.** A pinned *Airspace watch* message lists every enabled zone, who flagged is inside it and who is inbound, edited in place only when it changes. At `DIGEST_TIME` (21:00) a daily digest summarises military aircraft seen, flagged zone entries, the most-heard callsigns, each station's traffic and busiest hour, and emergencies.
+
+| Command | |
+|---|---|
+| `/zones` | Every zone, who is in it, who is inbound |
+| `/zone ybcg_ctr` | Aircraft inside one zone |
+| `/zone on\|off evans_head` | Enable or disable a zone (persisted) |
+| `/predict on\|off` | Predicted-entry alerts |
+| `/heard QFA` | Recent radio mentions of a callsign (prefix match) |
+| `/digest` | Post the digest now |
+
 ### Map
 
-Set `ADSB_WEB_ENABLED=1` for a live map at `http://localhost:8099` — everything tracked, the display box drawn, aircraft coloured by classification (orange military, red in the box, grey probable display, blue civil). It is read-only: GET and HEAD only, no filesystem serving, unknown paths 404.
+Set `ADSB_WEB_ENABLED=1` for a live map at `http://localhost:8099` — everything tracked, the airspace zones drawn, aircraft coloured by role (red emergency, pink watchlist, orange military, blue emergency services, grey probable, purple notable, blue-grey civil), with a dashed 3-minute vector on every flagged aircraft. The sidebar adds the zone board, a watch feed of zone events and flagged radio calls, and callsign chips on each transcript — click one to jump to the aircraft it was matched to. It is read-only: GET and HEAD only, no filesystem serving, unknown paths 404.
 
 Aircraft draw as their actual type: a C-17 gets the C-17 silhouette, a Hercules the Hercules, a Jet Provost a straight-wing trainer — rotated to the reported track, the same way [globe.adsbexchange.com](https://globe.adsbexchange.com/) does it. The shapes come from [tar1090](https://github.com/wiedehopf/tar1090)'s `markers.js` and live in `data/adsb_marker_shapes.json` (93 shapes, ~500 type mappings).
 
 > **Licence note:** those shapes are **GPL-2.0-or-later**, tar1090's own licence — unlike the rest of this repo. Fine for personal use; worth knowing if you ever publish or distribute the repository. The full notice is inside the JSON file.
 
-`data/adsb_marker_shapes.json` is plain data, so you can retype an aircraft by editing it — `"P40": ["hi_perf", 1.0]` points the Kittyhawk at the single-seat-fighter silhouette. Roughly 70 designators are this project's own additions (listed under `_extra_mappings`), mostly airshow warbirds and local GA types tar1090 leaves to the emitter category. `test_adsb.py` checks that every mapping names a shape that exists and that every type the classifier can flag has one, so a typo fails the tests rather than silently drawing nothing.
+`data/adsb_marker_shapes.json` is plain data, so you can retype an aircraft by editing it — `"P40": ["hi_perf", 1.0]` points the Kittyhawk at the single-seat-fighter silhouette. Roughly 70 designators are this project's own additions (listed under `_extra_mappings`), mostly warbirds and local GA types tar1090 leaves to the emitter category. `test_adsb.py` checks that every mapping names a shape that exists and that every type the classifier can flag has one, so a typo fails the tests rather than silently drawing nothing.
 
 Set `ADSB_WEB_BIND=tailscale` (the default in `.env.example`) and it listens on this machine's Tailnet address **and** loopback — reachable from your phone, invisible to whatever network the machine is plugged into. The Tailscale address is found at startup by scanning for a `100.64/10` interface, so it works wherever the `tailscale` binary happens to be installed, and both URLs are printed by `run.command`, logged in the terminal, and posted to `#commands` when the tracker starts. `0.0.0.0` still works if you want it, with a warning. `ADSB_WEB_TOKEN` adds a shared secret on top.
 
@@ -453,11 +497,14 @@ The gate also tracks a rolling noise floor and requires speech to sit a multiple
 | `config.py` → `MILITARY_CALLSIGN_BLOCKLIST` / `_AMBIGUOUS` | Which callsigns may fire, and how much corroboration they need |
 | `config.py` → `MILITARY_MIN_CONFIDENCE` / `MILITARY_ALERT_ON_FUZZY` | How readily a misheard callsign counts |
 | `.env` → `MILITARY_DETECTION_ENABLED` / `MILITARY_REFRESH_HOURS` | Military callsign detection on/off and scrape interval |
-| `.env` → `DISCORD_CHANNEL_MILITARY` / `DISCORD_CHANNEL_FLIGHTS` | ADS-B alert channels — tracking stays off until one is set |
+| `.env` → `DISCORD_CHANNEL_MILITARY` / `DISCORD_CHANNEL_FLIGHTS` / `DISCORD_CHANNEL_AIRSPACE` | ADS-B and airspace-watch channels |
 | `.env` → `ADSB_CIVIL_REPORTING` | How much civil YBCG traffic reaches the flights channel (`airline` / `mil_only` / `all`) |
 | `.env` → `ADSB_QUIET_HOURS` | Suppress non-emergency ADS-B alerts overnight |
 | `.env` → `ADSB_LOST_SEC` / `ADSB_APPEAR_GAP_MIN` | Anti-flapping thresholds — raise the first if transponder-off alerts are chatty |
-| `.env` → `ADSB_BOX_BBOX` / `ADSB_BOX_POLYGON` | The airshow display box |
+| `data/airspace_zones.json` | Named airspace zones, their altitude bands and which roles alert — re-read on change |
+| `data/airline_telephony.json` | Spoken airline / emergency-service callsigns → ADS-B ident prefixes |
+| `.env` → `AIRSPACE_PREDICT_*` / `AIRSPACE_MAX_ALERTS_PER_MIN` | Predicted-entry horizon and zone alert rate |
+| `.env` → `RADIO_FLAG_ROLES` / `RADIO_ATTACH_AUDIO` / `DIGEST_TIME` | What radio callsigns get flagged, audio clips, daily digest time |
 | `.env` → `ADSB_MIL_CONFIDENCE` / `ADSB_ALERT_MIN_CONFIDENCE` | How much corroboration before an aircraft counts as military |
 | `.env` → `ADSB_WEB_ENABLED` / `ADSB_WEB_BIND` / `ADSB_WEB_TOKEN` | Local live map (see the Tailscale note above) |
 | `data/adsb_types.json` | Military / warbird / aerobatic ICAO type codes and operator keywords — re-read on change |
