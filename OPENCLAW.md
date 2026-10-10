@@ -9,7 +9,7 @@ This document explains how the openclaw agent can launch and use the ATC Tracker
 `atc_tracker.py` streams multiple live ATC feeds from LiveATC.net, detects each radio call via voice activity detection, transcribes it locally on Apple Silicon (no external API needed), and:
 
 - Prints every transcription to the terminal log with a timestamp and station label
-- Saves the transmission audio to `recordings/YYYY-MM-DD/<ICAO>_<HHMMSS>.wav`
+- Transcribes the transmission audio, then deletes the temporary WAV (set `KEEP_RECORDINGS=1` to archive it)
 - Sends every transcription to that station's own Discord channel (see `DISCORD.md`)
 - Sends every transcription to the configured Telegram chat when Telegram is enabled
 - Mirrors keyword matches into Discord's `#alerts` channel, in two tiers: emergency terms (MAYDAY, PAN PAN, squawk 7700/7600/7500) ping `@here`; interest terms (military callsigns and types, RESTRICTED, COASTAL) post without a ping
@@ -61,6 +61,7 @@ STREAM_URL_YBBN=
 
 STT_BACKEND=whisper
 RECORDING_ENABLED=1
+KEEP_RECORDINGS=0
 RECORDING_RETENTION_DAYS=14
 
 HUGGINGFACE_TOKEN=
@@ -129,7 +130,7 @@ kill <PID>
 - Each station streams independently in its own thread
 - Every radio call is transcribed when the transmission ends (0.7 s of silence), capped at 25 s per transmission
 - Transcripts pass a quality gate and hallucination filter before being sent anywhere; rejected ones are counted under `gated` in `/health`
-- The audio is saved to `recordings/YYYY-MM-DD/<ICAO>_<HHMMSS>.wav` and named in the log line and Discord embed footer
+- The audio is deleted once transcribed; with `KEEP_RECORDINGS=1` it is kept in `recordings/YYYY-MM-DD/<ICAO>_<HHMMSS>.wav` and named in the log line and Discord embed footer
 - A Discord embed goes to that station's channel for every call, regardless of keywords; Telegram too when enabled
 - Emergency-tier matches also post to `#alerts` with an `@here` ping; interest-tier matches post there silently
 - Muting/unmuting a station or pausing/resuming the whole tracker (from either platform) posts a status update into that station's Discord channel(s) too
@@ -316,7 +317,7 @@ Station numbers match the order in the startup list (and the `STREAMS` list in `
 | `.env` | `DISCORD_COMMANDS_CHANNEL_ID` | Discord `#commands` channel ID |
 | `.env` | `DISCORD_CHANNEL_<ICAO>` | Discord channel ID for that station |
 | `.env` | `STT_BACKEND` | `whisper` or `parakeet` |
-| `.env` | `RECORDING_ENABLED` / `RECORDING_RETENTION_DAYS` | Transmission audio recording |
+| `.env` | `RECORDING_ENABLED` / `KEEP_RECORDINGS` / `RECORDING_RETENTION_DAYS` | Transmission audio recording |
 | `config.py` → `STREAMS` | list of dicts | ATC feeds — mount, per-station prompt and VAD threshold |
 | `config.py` → `KEYWORDS_EMERGENCY` | list of strings | Terms that trigger 🚨 `@here` alerts |
 | `config.py` → `KEYWORDS_INTEREST` | list of strings | Terms that trigger 🔴 silent alerts |
