@@ -27,7 +27,7 @@ import sys
 import threading
 import time
 import wave
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Callable, Optional
@@ -833,61 +833,69 @@ class Transcriber:
         self._state.health[icao].last_tx_at = time.time()
 
         recording = self._save_recording(raw_audio if raw_audio is not None else np.array([]), icao)
-        rec_name = recording.name if recording else ""
+        rec_name = recording.name if recording and config.KEEP_RECORDINGS else ""
+        try:
+            military = _military_matches(text, self._state)
+            highlight = KEYWORDS + [m.matched_text for m in military]
 
-        military = _military_matches(text, self._state)
-        highlight = KEYWORDS + [m.matched_text for m in military]
+            dur_str = f"({duration:.1f}s) " if duration > 0 else ""
+            line = Text()
+            line.append(f"[{ts}] {icao} {station_name:<16} {dur_str}│ ", style="bold green")
+            line.append_text(_highlight_keywords(text, highlight, enabled=self._state.keywords_enabled))
+            self._tui_log(line)
+            if military:
+                self._tui_log(Text(
+                    f"{'':>{len(ts) + 2}} \U0001f6e9 {_military_summary(military)}",
+                    style="bold magenta" if any(m.strong for m in military) else "dim magenta",
+                ))
 
-        dur_str = f"({duration:.1f}s) " if duration > 0 else ""
-        line = Text()
-        line.append(f"[{ts}] {icao} {station_name:<16} {dur_str}│ ", style="bold green")
-        line.append_text(_highlight_keywords(text, highlight, enabled=self._state.keywords_enabled))
-        self._tui_log(line)
-        if military:
-            self._tui_log(Text(
-                f"{'':>{len(ts) + 2}} \U0001f6e9 {_military_summary(military)}",
-                style="bold magenta" if any(m.strong for m in military) else "dim magenta",
-            ))
-
-        tier = _keyword_tier(text)
-        if any(m.strong for m in military):
-            tier = max(tier, TIER_INTEREST)
-        _send_telegram(text, ts, icao, station_name, tier, military)
-        _send_discord(text, ts, ts_iso, icao, station_name, tier, rec_name, military)
-        mentions = _process_radio_intel(
-            text, icao, station_name, ts, ts_iso, tier, military, recording, self._state,
-        )
-        if mentions:
-            self._tui_log(Text(
-                f"{'':>{len(ts) + 2}} \U0001f4fb " + " · ".join(
-                    m.callsign.canonical + (f" → {m.track.label()}" if m.track is not None else "")
+            tier = _keyword_tier(text)
+            if any(m.strong for m in military):
+                tier = max(tier, TIER_INTEREST)
+            _send_telegram(text, ts, icao, station_name, tier, military)
+            _send_discord(text, ts, ts_iso, icao, station_name, tier, rec_name, military)
+            mentions = _process_radio_intel(
+                text, icao, station_name, ts, ts_iso, tier, military, recording, self._state,
+            )
+            if mentions:
+                self._tui_log(Text(
+                    f"{'':>{len(ts) + 2}} \U0001f4fb " + " · ".join(
+                        m.callsign.canonical + (f" → {m.track.label()}" if m.track is not None else "")
+                        for m in mentions
+                    ),
+                    style="cyan",
+                ))
+            _transcript_feed.add({
+                "at": time.time(),
+                "ts": ts,
+                "icao": icao,
+                "station": station_name,
+                "text": text,
+                "tier": tier,
+                "military": [m.label for m in military if m.strong],
+                "callsigns": [
+                    {
+                        "callsign": m.callsign.canonical,
+                        "kind": m.callsign.kind,
+                        "hex": m.track.hex if m.track is not None else "",
+                    }
                     for m in mentions
-                ),
-                style="cyan",
-            ))
-        _transcript_feed.add({
-            "at": time.time(),
-            "ts": ts,
-            "icao": icao,
-            "station": station_name,
-            "text": text,
-            "tier": tier,
-            "military": [m.label for m in military if m.strong],
-            "callsigns": [
-                {
-                    "callsign": m.callsign.canonical,
-                    "kind": m.callsign.kind,
-                    "hex": m.track.hex if m.track is not None else "",
-                }
-                for m in mentions
-            ],
-        })
-        if self._log_file:
-            try:
-                with open(self._log_file, "a", encoding="utf-8") as f:
-                    f.write(f"{ts} | {icao} | {station_name} | {text} | {rec_name}\n")
-            except Exception:
-                pass
+                ],
+            })
+            if self._log_file:
+                try:
+                    with open(self._log_file, "a", encoding="utf-8") as f:
+                        f.write(f"{ts} | {icao} | {station_name} | {text} | {rec_name}\n")
+                except Exception:
+                    pass
+        finally:
+            # Once transcribed (and any Discord attachment read into memory) the
+            # audio has served its purpose — drop it so recordings/ never grows.
+            if recording is not None and not config.KEEP_RECORDINGS:
+                try:
+                    recording.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def shutdown(self):
         try:
@@ -1237,13 +1245,13 @@ class DiscordOutbox:
         priority: bool = False,
         message_id: Optional[str] = None,
         allowed_mentions: Optional[dict] = None,
-        file_path: Optional[str] = None,
+        file: Optional[tuple] = None,
     ) -> None:
         if not config.DISCORD_ENABLED or not channel_id:
             return
         item = (
             channel_id, content, dict(embed) if embed else None, message_id,
-            allowed_mentions, file_path,
+            allowed_mentions, file,
         )
         try:
             self._queue.put_nowait(item)
@@ -1273,14 +1281,14 @@ class DiscordOutbox:
             if item is None:
                 self._queue.task_done()
                 break
-            channel_id, content, embed, message_id, allowed_mentions, file_path = item
+            channel_id, content, embed, message_id, allowed_mentions, file = item
             try:
                 if message_id:
                     _edit_discord(channel_id, message_id, content=content, embed=embed)
                 else:
                     _post_discord(
                         channel_id, content=content, embed=embed,
-                        allowed_mentions=allowed_mentions, file_path=file_path,
+                        allowed_mentions=allowed_mentions, file=file,
                     )
             finally:
                 self._queue.task_done()
@@ -1374,22 +1382,17 @@ def _post_discord(
     content: Optional[str] = None,
     embed: Optional[dict] = None,
     allowed_mentions: Optional[dict] = None,
-    file_path: Optional[str] = None,
+    file: Optional[tuple] = None,
 ) -> Optional[str]:
+    """`file` is (filename, bytes, content_type), held in memory so the source
+    recording can be deleted as soon as it has been transcribed."""
     if not config.DISCORD_ENABLED or not channel_id:
         return None
     payload = _discord_payload(content, embed, allowed_mentions)
     if not payload:
         return None
-    file = None
-    if file_path:
-        try:
-            path = Path(file_path)
-            if path.stat().st_size <= config.RADIO_ATTACH_MAX_BYTES:
-                file = (path.name, path.read_bytes(), "audio/wav")
-                payload["attachments"] = [{"id": 0, "filename": path.name}]
-        except OSError:
-            file = None
+    if file is not None:
+        payload["attachments"] = [{"id": 0, "filename": file[0]}]
     data = _discord_request(
         "POST", f"{_DISCORD_API}/channels/{channel_id}/messages", payload,
         f"send [{channel_id}]", file=file,
@@ -1422,20 +1425,20 @@ def _enqueue_discord(
     priority: bool = False,
     message_id: Optional[str] = None,
     allowed_mentions: Optional[dict] = None,
-    file_path: Optional[str] = None,
+    file: Optional[tuple] = None,
 ) -> None:
     if _discord_outbox is not None:
         _discord_outbox.submit(
             channel_id, content=content, embed=embed, priority=priority,
             message_id=message_id, allowed_mentions=allowed_mentions,
-            file_path=file_path,
+            file=file,
         )
     elif message_id:
         _edit_discord(channel_id, message_id, content=content, embed=embed)
     else:
         _post_discord(
             channel_id, content=content, embed=embed,
-            allowed_mentions=allowed_mentions, file_path=file_path,
+            allowed_mentions=allowed_mentions, file=file,
         )
 
 
@@ -2257,7 +2260,7 @@ def _process_radio_intel(
     store = _radio_store()
     now = time.time()
     store.log_transmission(now, icao, tier)
-    rec_name = recording.name if recording else ""
+    rec_name = recording.name if recording and config.KEEP_RECORDINGS else ""
     flagged = []
     for m in mentions:
         if m.track is not None and poller is not None:
@@ -2355,7 +2358,7 @@ def _send_radio_flag(
     else:
         colour = 0x9B59B6
     names = _zone_names()
-    rec_name = Path(recording_path).name if recording_path else ""
+    rec_name = Path(recording_path).name if recording_path and config.KEEP_RECORDINGS else ""
     embed = {
         "title": (
             f"\U0001f4fb {', '.join(m.callsign.canonical for m in flagged)} — "
@@ -2367,8 +2370,17 @@ def _send_radio_flag(
         "footer": {"text": f"{ts} · {rec_name}" if rec_name else ts},
         "timestamp": ts_iso,
     }
-    attach = recording_path if (config.RADIO_ATTACH_AUDIO and recording_path) else None
-    _enqueue_discord(channel_id, embed=embed, priority=tier > TIER_NONE, file_path=attach)
+    # Read the audio now: the recording is deleted once _log returns, long
+    # before the outbox gets round to posting.
+    attach = None
+    if config.RADIO_ATTACH_AUDIO and recording_path:
+        try:
+            path = Path(recording_path)
+            if path.stat().st_size <= config.RADIO_ATTACH_MAX_BYTES:
+                attach = (path.name, path.read_bytes(), "audio/wav")
+        except OSError:
+            attach = None
+    _enqueue_discord(channel_id, embed=embed, priority=tier > TIER_NONE, file=attach)
 
 
 # --- pinned zone board ------------------------------------------------------
@@ -3522,9 +3534,16 @@ def _preflight_streams(state: SharedState, console: Console) -> list[str]:
 
 
 def _prune_recordings(recordings_dir: Path, retention_days: int, console: Console) -> None:
-    if retention_days <= 0 or not recordings_dir.exists():
+    """Drops day folders older than retention_days. With KEEP_RECORDINGS off,
+    clears everything — leftovers from a crash or from before the switch."""
+    if not recordings_dir.exists():
         return
-    cutoff = (datetime.now(timezone.utc).astimezone(_AEST) - timedelta(days=retention_days)).date()
+    if config.KEEP_RECORDINGS:
+        if retention_days <= 0:
+            return
+        cutoff = (datetime.now(timezone.utc).astimezone(_AEST) - timedelta(days=retention_days)).date()
+    else:
+        cutoff = date.max
     removed = 0
     for day_dir in recordings_dir.iterdir():
         if not day_dir.is_dir():
@@ -3539,7 +3558,7 @@ def _prune_recordings(recordings_dir: Path, retention_days: int, console: Consol
                 removed += 1
             day_dir.rmdir()
     if removed:
-        console.print(f"[dim]Pruned {removed} recordings older than {retention_days} days[/dim]")
+        console.print(f"[dim]Pruned {removed} old recordings[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -3672,7 +3691,7 @@ def main() -> None:
     recordings_dir = Path(__file__).parent / "recordings"
     if state.recording_enabled:
         recordings_dir.mkdir(exist_ok=True)
-        _prune_recordings(recordings_dir, config.RECORDING_RETENTION_DAYS, console)
+    _prune_recordings(recordings_dir, config.RECORDING_RETENTION_DAYS, console)
 
     global _display_ref
     display = LiveDisplay(f"{model}  [{_backend_name}]", state, console)

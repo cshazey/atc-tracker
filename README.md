@@ -459,9 +459,9 @@ UPDATE_INTERVAL=300 bash run.command
 
 ## Recordings
 
-Every detected transmission is saved to `recordings/YYYY-MM-DD/<ICAO>_<HHMMSS>.wav` (16 kHz mono, pre-processing, so it stays a faithful source for re-transcription). The filename appears in the terminal log line and in the Discord embed footer, so any transcript can be traced back to its audio.
+Each detected transmission is written to `recordings/YYYY-MM-DD/<ICAO>_<HHMMSS>.wav` (16 kHz mono, pre-processing) only for as long as it takes to transcribe it and post it: once the transcript is logged — and any `#airspace-watch` audio attachment has been read into memory — the WAV is deleted, so `recordings/` doesn't fill the disk. Any WAVs left over (from a crash, or from before this change) are cleared at startup.
 
-Recordings older than `RECORDING_RETENTION_DAYS` (default 14) are pruned at startup. Disable entirely with `RECORDING_ENABLED=0`, `--no-recording`, or `/record off` at runtime. `recordings/` is git-ignored.
+To archive audio for re-transcription or `bench_stt.py`, set `KEEP_RECORDINGS=1`. Kept recordings are named in the terminal log line and Discord embed footer, and those older than `RECORDING_RETENTION_DAYS` (default 14) are pruned at startup. Disable entirely with `RECORDING_ENABLED=0`, `--no-recording`, or `/record off` at runtime. `recordings/` is git-ignored.
 
 ---
 
@@ -486,7 +486,7 @@ The gate also tracks a rolling noise floor and requires speech to sit a multiple
 | `.env` | Telegram credentials |
 | `.env` | Discord bot token + channel IDs (see [DISCORD.md](DISCORD.md)) |
 | `.env` → `STT_BACKEND` | `whisper` or `parakeet` |
-| `.env` → `RECORDING_ENABLED` / `RECORDING_RETENTION_DAYS` | Transmission audio recording |
+| `.env` → `RECORDING_ENABLED` / `KEEP_RECORDINGS` / `RECORDING_RETENTION_DAYS` | Transmission audio recording |
 | `config.py` → `STREAMS` | Add/remove ATC feeds, per-station prompt and VAD threshold |
 | `config.py` → `KEYWORDS_EMERGENCY` / `KEYWORDS_INTEREST` | Alert tiers |
 | `config.py` → `WHISPER_MODEL` / `PARAKEET_MODEL` | Swap models |

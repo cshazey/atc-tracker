@@ -62,7 +62,7 @@ The `adsb` channels are optional. `#airspace-watch` falls back to `#alerts` when
 > Golf Bravo Charlie cleared runway two eight
 > *14:32:01 AEST / 04:32:01Z · YBCG_143201.wav*
 
-The footer names the saved audio file for that transmission (`recordings/<date>/<ICAO>_<HHMMSS>.wav`), so any transcript can be traced back to what was actually said. Omitted when recording is off.
+The footer names the saved audio file for that transmission (`recordings/<date>/<ICAO>_<HHMMSS>.wav`), so any transcript can be traced back to what was actually said. Only shown with `KEEP_RECORDINGS=1` — by default the audio is deleted once transcribed.
 
 The timestamp (both the footer text and Discord's own clock-formatted embed timestamp) reflects **when the transmission was received** — i.e. when the radio call ended and VAD flushed the buffer — not when the message was posted. Transcription runs after that, so for a long or queued transmission the actual Discord message can land a little later; the timestamp still reflects the original receipt moment, not the post moment.
 

@@ -257,6 +257,10 @@ STREAM_STALL_TIMEOUT_SEC = 20    # no audio for this long → force reconnect
 # ---------------------------------------------------------------------------
 RECORDING_ENABLED = os.environ.get("RECORDING_ENABLED", "1").strip() not in ("0", "false", "False", "")
 RECORDING_RETENTION_DAYS = _int("RECORDING_RETENTION_DAYS", 14)
+# By default each WAV is deleted as soon as it has been transcribed (and any
+# Discord attachment read into memory), so recordings/ never accumulates.
+# Set KEEP_RECORDINGS=1 to archive them for re-transcription / bench_stt.py.
+KEEP_RECORDINGS = _flag("KEEP_RECORDINGS", "0")
 
 # Substitutions applied to every transcript. Add entries here as you spot a
 # consistent misrecognition — the ones below were all observed in real YBCG /
