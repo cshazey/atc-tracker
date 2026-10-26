@@ -490,6 +490,11 @@ DISCORD_COMMANDS_CHANNEL_ID = os.environ.get("DISCORD_COMMANDS_CHANNEL_ID", "")
 
 for _s in STREAMS:
     _s["discord_channel_id"] = os.environ.get(f"DISCORD_CHANNEL_{_s['icao']}", "")
+    if _s["icao"] == "YBCG_TWR":
+        # Preferred user-facing name; retain the original key for existing installs.
+        _s["discord_channel_id"] = _str(
+            "DISCORD_CHANNEL_YBCG_TOWER", _s["discord_channel_id"].strip()
+        )
 
 DISCORD_ENABLED = bool(
     DISCORD_BOT_TOKEN

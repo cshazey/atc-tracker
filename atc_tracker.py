@@ -52,6 +52,7 @@ import geo
 import military_callsigns
 import radio_intel
 import transcription
+from transcript_log import TranscriptLog
 from config import (
     ATC_CORRECTIONS,
     AUDIO_PREPROCESSING,
@@ -719,11 +720,13 @@ class Transcriber:
         state: SharedState,
         log_file: Optional[Path] = None,
         recordings_dir: Optional[Path] = None,
+        transcript_log: Optional[TranscriptLog] = None,
     ):
         self._backend = backend
         self._state = state
         self._log_file = log_file
         self._recordings_dir = recordings_dir
+        self._transcript_log = transcript_log
         self._queue: queue.Queue = queue.Queue(maxsize=24)
         self._recent: dict = {}  # icao -> (text, monotonic_time) for dedup
         self._prompts = {s["icao"]: s.get("prompt", "") for s in STREAMS}
@@ -821,10 +824,23 @@ class Transcriber:
         duration: float = 0.0,
         raw_audio: Optional[np.ndarray] = None,
     ):
+        raw_text = text
         text = _apply_atc_corrections(text)
         if _is_hallucination(text, prompt=self._prompts.get(icao, "")):
             self.gated += 1
             return
+        # Persist before outbound delivery, enrichment and Discord deduplication.
+        # Separate real transmissions with identical words still matter when
+        # studying phrase frequency; they each get a row in the local CSV.
+        if self._transcript_log is not None:
+            try:
+                self._transcript_log.append(
+                    received_at=ts_iso, station_id=icao, station_name=station_name,
+                    duration=duration, backend=self._backend.name,
+                    raw_text=raw_text, text=text,
+                )
+            except Exception as exc:
+                self._tui_log(Text(f"⚠ Transcript CSV failed [{icao}]: {exc}", style="bold red"))
         now = time.monotonic()
         prev_text, prev_time = self._recent.get(icao, ("", 0.0))
         if text == prev_text and now - prev_time < 20.0:
@@ -3729,6 +3745,7 @@ def main() -> None:
 
         transcriber = Transcriber(
             backend, state, log_file=log_file, recordings_dir=recordings_dir,
+            transcript_log=TranscriptLog(log_dir / "transcripts", config.TIMEZONE),
         )
         _transcriber_ref = transcriber
 
