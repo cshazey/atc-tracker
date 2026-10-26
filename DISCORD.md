@@ -30,7 +30,7 @@ DISCORD_BOT_TOKEN=
 DISCORD_ALERTS_CHANNEL_ID=
 DISCORD_COMMANDS_CHANNEL_ID=
 DISCORD_CHANNEL_YBCG=
-DISCORD_CHANNEL_YBCG_TWR=
+DISCORD_CHANNEL_YBCG_TOWER=
 DISCORD_CHANNEL_YSPT=
 DISCORD_CHANNEL_YBBN=
 ```
@@ -43,7 +43,7 @@ Discord is active once `DISCORD_BOT_TOKEN`, `DISCORD_ALERTS_CHANNEL_ID`, `DISCOR
 | Category | Channel | Feeds from | `.env` var |
 |---|---|---|---|
 | ctafs | `#ybcg-brisbane-center` | YBCG Brisbane Centre | `DISCORD_CHANNEL_YBCG` |
-| ctafs | `#ybcg-tower` | YBCG_TWR Gold Coast Ground/Tower | `DISCORD_CHANNEL_YBCG_TWR` |
+| ctafs | `#ybcg-tower` | YBCG_TWR Gold Coast Ground/Tower | `DISCORD_CHANNEL_YBCG_TOWER` |
 | ctafs | `#yspt-southport-ctaf` | YSPT Southport | `DISCORD_CHANNEL_YSPT` |
 | ctafs | `#ybbn-brisbane-center` | YBBN Brisbane Tower | `DISCORD_CHANNEL_YBBN` |
 | alerts | `#alerts` | Every station (emergency + interest matches) | `DISCORD_ALERTS_CHANNEL_ID` |
