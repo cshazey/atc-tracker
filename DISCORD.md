@@ -96,6 +96,10 @@ Outbound mentions are otherwise suppressed via `allowed_mentions`, so a transcri
 ### `#mil-tracker` / `#gc-flights`
 **Purpose:** live ADS-B aircraft tracking, independent of the radio feeds. `#mil-tracker` carries military, probable-military and notable aircraft; `#gc-flights` carries Gold Coast Airport movements.
 **Posts when:** an aircraft's transponder comes on or goes off, it departs from or is inbound to YBCG, or it squawks an emergency code. Emergencies also mirror to `#alerts` with `@here`. Zone entries go to `#airspace-watch`.
+
+`#mil-tracker` also gets **military callsigns heard on the radio** — a strong match such as "Falcon 21" on Brisbane Centre (a 6 SQN EA-18G Growler) — with the transcript, the aircraft type and squadron, and the ADS-B track when one matches. Plenty of ADF traffic never shows up on ADS-B with a usable ident, so this is the only way it reaches the channel. Each callsign + flight number posts at most once per `MILITARY_RADIO_COOLDOWN_SEC` (10 min) across all stations, so a sortie handed from Centre to Approach to Tower is one post. Possible (weak) matches stay as annotations in the station channel. Turn it off with `MILITARY_RADIO_TO_MIL_CHANNEL=0`.
+
+**Muting everything else.** Because every military sighting, radio or ADS-B, now lands in `#mil-tracker`, you can mute the station channels and set `#mil-tracker` to *All messages*. Live cards and the pinned board edit in place and do not notify; new posts do. Leave `#alerts` unmuted too if you want genuine emergencies (`@here`).
 **Example:**
 > 📡 **Transponder on — TROJ23**
 > **ADF · TROJAN · C-130J-30**

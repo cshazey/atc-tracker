@@ -756,6 +756,13 @@ ADSB_MARKER_SHAPES_FILE = _str(
 )
 
 DISCORD_CHANNEL_MILITARY = os.environ.get("DISCORD_CHANNEL_MILITARY", "")
+# Military callsigns heard on the radio ("Falcon 21" on Brisbane Centre) are
+# posted to #mil-tracker as well as #alerts, so that one channel carries every
+# military sighting whether it came from ADS-B or a transmission. Only strong
+# matches go there; the cooldown is per callsign and flight number across all
+# stations, because one sortie talks to Centre, Approach and Tower in turn.
+MILITARY_RADIO_TO_MIL_CHANNEL = _flag("MILITARY_RADIO_TO_MIL_CHANNEL", "1")
+MILITARY_RADIO_COOLDOWN_SEC = _num("MILITARY_RADIO_COOLDOWN_SEC", 600)
 DISCORD_CHANNEL_FLIGHTS = os.environ.get("DISCORD_CHANNEL_FLIGHTS", "")
 # #airspace-watch: radio callsign flags, zone entries/exits, predicted entries,
 # the pinned zone board and the daily digest. Falls back to #alerts.

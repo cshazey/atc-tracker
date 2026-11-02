@@ -875,6 +875,8 @@ class Transcriber:
             mentions = _process_radio_intel(
                 text, icao, station_name, ts, ts_iso, tier, military, recording, self._state,
             )
+            if not self._state.paused:
+                _send_military_radio(text, icao, station_name, ts_iso, rec_name, military, mentions)
             if mentions:
                 self._tui_log(Text(
                     f"{'':>{len(ts) + 2}} \U0001f4fb " + " · ".join(
@@ -2399,6 +2401,65 @@ def _send_radio_flag(
         except OSError:
             attach = None
     _enqueue_discord(channel_id, embed=embed, priority=tier > TIER_NONE, file=attach)
+
+
+_mil_radio_cooldown = radio_intel.FlagCooldown(config.MILITARY_RADIO_COOLDOWN_SEC)
+
+
+def _send_military_radio(
+    text: str,
+    icao: str,
+    station_name: str,
+    ts_iso: str,
+    rec_name: str,
+    military: list,
+    mentions: list,
+    now: Optional[float] = None,
+) -> list:
+    """Post strong military callsign hits from the radio to #mil-tracker.
+
+    #mil-tracker is otherwise ADS-B only, and plenty of ADF traffic (a Growler
+    working Brisbane Centre, say) never shows up there with a usable ident. With
+    this the channel can be the one left unmuted. Returns the matches posted.
+    """
+    channel_id = config.DISCORD_CHANNEL_MILITARY
+    if not (config.MILITARY_RADIO_TO_MIL_CHANNEL and config.DISCORD_ENABLED and channel_id):
+        return []
+    now = time.time() if now is None else now
+    fresh = [
+        m for m in military
+        if m.strong and _mil_radio_cooldown.ready((m.label.upper(),), now)
+    ]
+    if not fresh:
+        return []
+
+    names = _zone_names() if any(mt.track is not None for mt in mentions or []) else {}
+    fields = []
+    for m in fresh[:6]:
+        lines = [" — ".join(b for b in (m.aircraft, m.squadron) if b) or "Unlisted type"]
+        if m.kind != "exact":
+            lines.append(f"Heard “{m.matched_text}” ({m.kind} {m.confidence:.2f})")
+        squashed = m.callsign.replace(" ", "")
+        mention = next((
+            mt for mt in mentions or []
+            if mt.callsign.kind == radio_intel.KIND_MILITARY
+            and mt.callsign.canonical.startswith(squashed)
+            and mt.track is not None
+        ), None)
+        if mention is not None:
+            lines.append(_mention_field(mention, names)["value"].split("\n", 1)[-1])
+        fields.append({"name": f"\U0001f396️ {m.label}"[:256], "value": "\n".join(lines)[:1024], "inline": False})
+
+    embed = {
+        "title": f"\U0001f4fb {', '.join(m.label for m in fresh)} heard on {icao} {station_name}"[:256],
+        "description": f"> {text}"[:4000],
+        "color": 0xE67E22,
+        "fields": fields,
+        "footer": {"text": f"Radio · {rec_name}" if rec_name else "Radio"},
+        "timestamp": ts_iso,
+    }
+    _enqueue_discord(channel_id, embed=embed, priority=True)
+    return fresh
 
 
 # --- pinned zone board ------------------------------------------------------
