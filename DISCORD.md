@@ -80,8 +80,10 @@ Connection status uses **one pinned message per channel, created at startup and 
 
 | Tier | Matches | Behaviour |
 |---|---|---|
-| 🚨 Emergency | MAYDAY, PAN PAN, EMERGENCY, squawk 7700/7600/7500, GUARD | Red embed **and an `@here` ping** naming the matched term |
-| 🔴 Interest | Military callsigns and types (HORNET, ROULETTES, F-35, WARBIRD, FORMATION…), RESTRICTED, COASTAL | Orange embed, **no ping** |
+| 🚨 Emergency | MAYDAY, PAN PAN, declaring an emergency, fuel/medical emergency, 7700, 7600, squawk 7500 | Red embed **and an `@here` ping** naming the matched term |
+| 🔴 Interest | Military callsigns and types (HORNET, ROULETTES, F-35, WARBIRD, FORMATION…), RESTRICTED, COASTAL, bare EMERGENCY, guard frequency / 121.5 | Orange embed, **no ping** |
+
+Bare GUARD, bare 7500 and bare EMERGENCY no longer ping: Whisper hears "good day" as "Coast Guard", 7500 is the VFR cruising altitude, and "frequency change" comes out as "emergency change".
 
 **Posts when:** any station's transmission matches — mirrors the same transmission that also posted to its own station channel.
 
@@ -202,3 +204,15 @@ Every command reply appears in `#commands`, and any station mute/unmute or globa
 **Commands not responding at all (nothing happens, not even the above):** confirm the bot can view *and* read history in `#commands` (Read Message History permission — the tracker polls for new messages every ~2.5s, it does not use a live gateway connection).
 
 **Discord/network outage spams the terminal:** the tracker now logs the first command polling failure, backs off up to 60 seconds between retries, then logs once when polling recovers. Transcription and stream reconnects keep running while Discord is unreachable.
+
+## Restricted-area channel (`DISCORD_CHANNEL_R609_ACTIVITY`)
+
+**Purpose:** is R609 (Evans Head Air Weapons Range) active? The data comes from NAIPS: the SOAP `restricted-area-status` operation, which is the same data as the website's Restricted Area Briefing. It uses `NAIPS_USERNAME` / `NAIPS_PASSWORD` from `.env`.
+
+- A **pinned status board** shows active or deactivated, the NOTAM'd periods for the next 24 h, limits and NOTAM id. It is updated on every check.
+- **`@here` alert** when R609 goes **ACTIVE**, and again when it **DEACTIVATES**. Both are mirrored to `#alerts` without a ping.
+- Checks run 07:00–19:00 local (`RA_WATCH_HOURS`): every 30 min while idle, and every 15 min once active, until NAIPS shows it deactivated. The watch also checks a minute after any NOTAM'd start or end time it already knows about.
+- If it is still active at 19:00, one unpinged "still active" note is posted and checks resume at 07:00.
+- `/ra` gives the status now. `/ra R625A` works for any restricted area.
+
+Add more areas with `RA_WATCH=R609,R625A`. Each one posts to `DISCORD_CHANNEL_<AREA>_ACTIVITY`, or to the airspace channel if that is not set.

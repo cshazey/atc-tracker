@@ -120,6 +120,29 @@ check("routine -> none", A._keyword_tier("Qantas four one two contact ground one
 check("'runway 18' no longer alerts", A._keyword_tier("joining downwind runway 18"), A.TIER_NONE)
 check("'500 feet' no longer alerts", A._keyword_tier("climbing to 500 feet"), A.TIER_NONE)
 
+# Every @here in #alerts on 29 Oct 2026 was one of these — Whisper mishearings.
+check("'Coast Guard' (good day) no @here",
+      A._keyword_tier("Coast Guard uniform, now take control of the airspace") < A.TIER_EMERGENCY, True)
+check("'back off guard' no @here",
+      A._keyword_tier("Remain outside, called airspace, squawk one six, six two, AKT, back off guard.") < A.TIER_EMERGENCY, True)
+check("'Tower Guard' no @here",
+      A._keyword_tier("Tower Guard, this is David's holding point, Charlie North") < A.TIER_EMERGENCY, True)
+check("7500 ft cruising altitude no @here",
+      A._keyword_tier("shortly turning right back northbound on the 7500 Southport.") < A.TIER_EMERGENCY, True)
+check("'7500' in a clearance request no @here",
+      A._keyword_tier("request code and airways clearance for direct Harvey Bay, 7500, SMA, X-ray.") < A.TIER_EMERGENCY, True)
+check("bare 'emergency' mishearing -> interest only",
+      A._keyword_tier("consult service, terminate, and emergency change approved, good night."), A.TIER_INTEREST)
+check("squawk 7500 still -> emergency", A._keyword_tier("Virgin eight two one squawk 7500"), A.TIER_EMERGENCY)
+check("squawking 7500 still -> emergency", A._keyword_tier("now squawking 7500"), A.TIER_EMERGENCY)
+check("declaring an emergency -> emergency",
+      A._keyword_tier("Tango Julia Bravo declaring an emergency, rough running engine"), A.TIER_EMERGENCY)
+check("fuel emergency -> emergency", A._keyword_tier("declaring fuel emergency"), A.TIER_EMERGENCY)
+check("pan pan -> emergency", A._keyword_tier("PAN PAN PAN PAN PAN PAN Brisbane Centre"), A.TIER_EMERGENCY)
+check("guard frequency -> interest",
+      A._keyword_tier("ELT heard on guard frequency"), A.TIER_INTEREST)
+check("121.5 -> interest", A._keyword_tier("broadcasting on 121.5"), A.TIER_INTEREST)
+
 
 # ---------------------------------------------------------------------------
 log_files = sorted(glob.glob("logs/*.log"))

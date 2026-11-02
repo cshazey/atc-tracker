@@ -10,7 +10,9 @@ Currently monitoring:
 
 Detects each radio call via voice activity detection, transcribes it with a local model, records the audio, logs it to the terminal, and forwards every transmission to Discord and/or Telegram (dual-send — both can run at once).
 
-Alerts are two-tier: **emergency** terms (MAYDAY, PAN PAN, squawk 7700/7600/7500) ping `@here` in `#alerts`; **interest** terms (military callsigns and types, RESTRICTED, COASTAL) post to `#alerts` without a ping. Both are highlighted in red in the terminal.
+Alerts are two-tier: **emergency** terms (MAYDAY, PAN PAN, declared emergencies, 7700/7600, squawk 7500) ping `@here` in `#alerts`; **interest** terms (military callsigns and types, RESTRICTED, COASTAL) post to `#alerts` without a ping. Both are highlighted in red in the terminal.
+
+Restricted area **R609 (Evans Head)** is watched via NAIPS from 07:00 to 19:00. `@here` alerts go out when it activates and when it deactivates. See DISCORD.md.
 
 Every transcript is also checked against a [scraped register of ADF callsigns](#military-callsign-detection), so "Falcon one one" is flagged as a 6 SQN Growler without anyone having to add FALCON to a keyword list.
 
