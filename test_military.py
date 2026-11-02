@@ -187,6 +187,43 @@ else:
 
 
 # ---------------------------------------------------------------------------
+print("\n#mil-tracker routing for radio callsigns")
+import atc_tracker as A
+
+posted: list = []
+_real_enqueue = A._enqueue_discord
+A._enqueue_discord = lambda channel_id, **kw: posted.append((channel_id, kw))
+_saved = (config.DISCORD_CHANNEL_MILITARY, config.DISCORD_ENABLED, config.MILITARY_RADIO_TO_MIL_CHANNEL)
+config.DISCORD_CHANNEL_MILITARY, config.DISCORD_ENABLED, config.MILITARY_RADIO_TO_MIL_CHANNEL = "mil", True, True
+A._mil_radio_cooldown = A.radio_intel.FlagCooldown(600)
+try:
+    # Heard on Brisbane Centre 2026-11-02, a 6 SQN Growler.
+    growler = ("Falcon 21, control service now terminated, contact AMVLF 126, Statesman two "
+               "four onwards. Service is terminated, switching to approach Falcon 21, thanks very much.")
+    sent = A._send_military_radio(growler, "YBCG", "Brisbane Centre", "2026-11-02T05:06:18+00:00",
+                                  "", M.detect(growler), [], now=1000.0)
+    check("Falcon 21 posted to #mil-tracker", [m.label for m in sent], ["FALCON 21"])
+    check("posted to the military channel", [c for c, _ in posted], ["mil"])
+    check("embed names the Growler", "GROWLER" in str(posted[0][1]["embed"]), True)
+    again = A._send_military_radio(growler, "YBBN", "Brisbane Tower", "", "", M.detect(growler), [], now=1300.0)
+    check("same flight on another station within cooldown is quiet", again, [])
+    later = A._send_military_radio(growler, "YBBN", "Brisbane Tower", "", "", M.detect(growler), [], now=1700.0)
+    check("cooldown expires", len(later), 1)
+    civil = "Jetstar four five six, descend to five thousand"
+    check("civil traffic not posted",
+          A._send_military_radio(civil, "YBCG", "", "", "", M.detect(civil), [], now=2000.0), [])
+    weak = [m for m in M.detect("Falcum one one, cleared visual") if not m.strong]
+    check("weak matches not posted",
+          A._send_military_radio("x", "YBCG", "", "", "", weak, [], now=2000.0), [])
+    config.MILITARY_RADIO_TO_MIL_CHANNEL = False
+    check("switch turns it off",
+          A._send_military_radio(growler, "YBCG", "", "", "", M.detect(growler), [], now=9000.0), [])
+finally:
+    A._enqueue_discord = _real_enqueue
+    config.DISCORD_CHANNEL_MILITARY, config.DISCORD_ENABLED, config.MILITARY_RADIO_TO_MIL_CHANNEL = _saved
+
+
+# ---------------------------------------------------------------------------
 print()
 if failures:
     print(f"❌ {len(failures)} failure(s)")

@@ -112,11 +112,12 @@ class TrackerLoggingTests(LogFixture):
     def setUp(self):
         super().setUp()
         self.state = SimpleNamespace(
-            display=None, keywords_enabled=False,
+            display=None, keywords_enabled=False, paused=False,
             health={"YSPT": SimpleNamespace(last_tx_at=0, dropped=0)},
         )
         for name, result in (("_send_discord", None), ("_send_telegram", None),
-                             ("_military_matches", []), ("_process_radio_intel", [])):
+                             ("_military_matches", []), ("_process_radio_intel", []),
+                             ("_send_military_radio", [])):
             mock = patch.object(tracker, name, return_value=result)
             setattr(self, name, mock.start())
             self.addCleanup(mock.stop)
