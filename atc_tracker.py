@@ -19,6 +19,7 @@ import collections
 import functools
 import html
 import json
+import os
 import queue
 import random
 import re
@@ -51,6 +52,7 @@ import config
 import geo
 import military_callsigns
 import radio_intel
+import restricted_area
 import transcription
 from transcript_log import TranscriptLog
 from config import (
@@ -2585,6 +2587,250 @@ def _digest_loop(state: SharedState) -> None:
                 _display_ref.log(Text(f"⚠ Daily digest failed: {exc}", style="dim yellow"))
 
 
+# --- restricted-area watch (NAIPS) -----------------------------------------
+
+_RA_BOARD_MARKERS = ("Restricted area status",)
+_ra_watches: dict = {}            # area -> restricted_area.RestrictedAreaWatch
+_ra_board_message: dict = {}      # area -> pinned message id
+_ra_board_last: dict = {}         # area -> last rendered description
+
+
+def _ra_label(area: str) -> str:
+    name = config.RA_LABELS.get(area, "")
+    return f"{area} {name}".strip()
+
+
+def _ra_local(dt: Optional[datetime], with_date: bool = False) -> str:
+    if dt is None:
+        return "?"
+    local = dt.astimezone(_AEST)
+    return local.strftime("%a %d %b %H:%M" if with_date else "%H:%M")
+
+
+def _ra_period_line(status, period) -> str:
+    notam = f" · NOTAM {period.notam}" if period.notam else ""
+    return (f"{_ra_local(period.start, True)} → {_ra_local(period.end, True)}"
+            f" · {status.limits(period)}{notam}")
+
+
+def _ra_board_embed(area: str, status=None, active: bool = False,
+                    checked: Optional[datetime] = None,
+                    next_check: Optional[datetime] = None,
+                    error: str = "") -> dict:
+    title = f"\U0001f6e1️ Restricted area status — {_ra_label(area)}"
+    if status is None:
+        return {"title": title, "description": error or "Starting up…",
+                "color": 0x95A5A6, "footer": {"text": f"updated {_now_ts()}"}}
+    now = checked or datetime.now(timezone.utc)
+    lines = []
+    if active:
+        current = status.active_period(now)
+        lines.append("\U0001f534 **ACTIVE**")
+        if current:
+            lines.append(f"Until **{_ra_local(current.end, True)}** · {status.limits(current)}")
+            if current.notam:
+                lines.append(f"NOTAM {current.notam}")
+        elif status.type == "H24":
+            lines.append("Active as published (H24)")
+    else:
+        lines.append("\U0001f7e2 **Deactivated**")
+    upcoming = [p for p in status.periods if p.start > now]
+    if upcoming:
+        lines.append("\n**Scheduled (next 24 h)**")
+        lines += [_ra_period_line(status, p) for p in upcoming[:5]]
+    elif not active:
+        lines.append("No activation NOTAM'd in the next 24 h.")
+    if status.activity:
+        lines.append(f"\nActivity: {status.activity}")
+    if error:
+        lines.append(f"\n⚠ Last check failed: {error[:200]}")
+    hours = config.RA_WATCH_HOURS
+    footer = f"checked {_ra_local(checked)}"
+    if next_check:
+        footer += f" · next {_ra_local(next_check)}"
+    footer += f" · watch {hours} · source NAIPS"
+    return {
+        "title": title,
+        "description": "\n".join(lines)[:3800],
+        "color": 0xE74C3C if active else 0x2ECC71,
+        "footer": {"text": footer},
+        "timestamp": _now_iso(),
+    }
+
+
+def _init_ra_boards() -> None:
+    """Create or adopt each area's pinned status board. Main thread, startup only."""
+    if not config.RA_WATCH_ENABLED:
+        return
+    for area, channel_id in config.RA_DISCORD_CHANNELS.items():
+        if not channel_id:
+            continue
+        embed = _ra_board_embed(area)
+        markers = tuple(f"{m} — {_ra_label(area)}" for m in _RA_BOARD_MARKERS)
+        existing = _find_existing_status_message(channel_id, markers)
+        if existing and _edit_discord(channel_id, existing, embed=embed):
+            _ra_board_message[area] = existing
+            continue
+        message_id = _post_discord(channel_id, embed=embed)
+        if message_id:
+            _ra_board_message[area] = message_id
+            _pin_discord(channel_id, message_id)
+
+
+def _ra_update_board(area: str, status, active: bool, checked, next_check, error: str = "") -> None:
+    channel_id = config.RA_DISCORD_CHANNELS.get(area)
+    if not channel_id:
+        return
+    embed = _ra_board_embed(area, status, active, checked, next_check, error)
+    # The footer's clock changes every check; compare the substance only.
+    key = embed["description"]
+    message_id = _ra_board_message.get(area)
+    if message_id:
+        _enqueue_discord(channel_id, embed=embed, message_id=message_id)
+    elif _ra_board_last.get(area) != key:
+        _enqueue_discord(channel_id, embed=embed)
+    _ra_board_last[area] = key
+
+
+def _ra_event(area: str, kind: str, status, now: datetime, info: dict) -> None:
+    """Activation / deactivation alerts. Both ping @here in the area's channel
+    and are mirrored, unpinged, to #alerts."""
+    channel_id = config.RA_DISCORD_CHANNELS.get(area)
+    label = _ra_label(area)
+    since = info.get("since")
+    interval = int(config.RA_ACTIVE_INTERVAL_MIN)
+    fields = []
+    if kind == restricted_area.EV_ACTIVATED:
+        current = status.active_period(now)
+        headline = f"\U0001f534 {area} ACTIVE"
+        desc = [f"**{label}** is now **ACTIVE** per NAIPS."]
+        if current:
+            fields += [
+                {"name": "Until", "value": _ra_local(current.end, True), "inline": True},
+                {"name": "Limits", "value": status.limits(current), "inline": True},
+            ]
+            if current.notam:
+                fields.append({"name": "NOTAM", "value": current.notam, "inline": True})
+        desc.append(f"Re-checking every {interval} min until it deactivates.")
+        color = 0xE74C3C
+    elif kind == restricted_area.EV_DEACTIVATED:
+        headline = f"\U0001f7e2 {area} DEACTIVATED"
+        desc = [f"**{label}** is now **deactivated** per NAIPS."]
+        if since:
+            mins = int((now - since).total_seconds() // 60)
+            desc.append(f"First seen active {_ra_local(since, True)} ({mins // 60} h {mins % 60:02d} m).")
+        upcoming = status.next_period(now)
+        if upcoming:
+            fields.append({"name": "Next scheduled", "value": _ra_period_line(status, upcoming),
+                           "inline": False})
+        color = 0x2ECC71
+    else:  # EV_WINDOW_CLOSED
+        current = status.active_period(now)
+        until = f" — NOTAM'd until {_ra_local(current.end, True)}" if current else ""
+        headline = f"\U0001f319 {area} still active"
+        desc = [f"Watch hours ({config.RA_WATCH_HOURS}) are over and **{label}** is still "
+                f"active{until}. Checks resume tomorrow morning."]
+        color = 0xE67E22
+
+    embed = {
+        "title": headline + (f" — {config.RA_LABELS[area]}" if area in config.RA_LABELS else ""),
+        "description": "\n".join(desc),
+        "color": color,
+        "fields": fields,
+        "footer": {"text": f"{_now_ts()} · source NAIPS restricted area briefing"},
+        "timestamp": _now_iso(),
+    }
+    important = kind in (restricted_area.EV_ACTIVATED, restricted_area.EV_DEACTIVATED)
+    if channel_id:
+        _enqueue_discord(
+            channel_id,
+            content=f"@here **{headline}**" if important else None,
+            embed=dict(embed),
+            priority=True,
+            allowed_mentions={"parse": ["everyone"]} if important else None,
+        )
+    if DISCORD_ALERTS_CHANNEL_ID and DISCORD_ALERTS_CHANNEL_ID != channel_id:
+        _enqueue_discord(DISCORD_ALERTS_CHANNEL_ID, embed=dict(embed), priority=important)
+    _post_telegram(f"<b>{html.escape(headline)}</b>\n{html.escape(' '.join(desc))}")
+    if _display_ref is not None:
+        _display_ref.log(Text(f"\U0001f6e1 {headline}", style="bold red" if kind == restricted_area.EV_ACTIVATED else "bold green"))
+
+
+def _ra_error(area: str, message: str) -> None:
+    """Reported once per outage, and once on recovery (empty message)."""
+    watch = _ra_watches.get(area)
+    if message:
+        if _display_ref is not None:
+            _display_ref.log(Text(f"⚠ NAIPS {area}: {message}", style="dim yellow"))
+        _enqueue_discord(DISCORD_COMMANDS_CHANNEL_ID,
+                         content=f"⚠️ NAIPS check for **{area}** failing: {message[:300]}")
+        if watch is not None and watch.last_status is not None:
+            _ra_update_board(area, watch.last_status, bool(watch.active),
+                             watch.last_checked, None, message)
+    elif _display_ref is not None:
+        _display_ref.log(Text(f"✅ NAIPS {area} reachable again", style="dim green"))
+
+
+def _start_ra_watches(state: SharedState) -> None:
+    window = restricted_area.parse_window(config.RA_WATCH_HOURS)
+    os.makedirs(os.path.dirname(config.RA_STATE_FILE), exist_ok=True)
+    for area in config.RA_WATCH:
+        def fetch(area=area):
+            result = restricted_area.fetch_status([area])
+            if area not in result:
+                raise restricted_area.NaipsError(f"NAIPS returned no status for {area}")
+            return result[area]
+
+        watch = restricted_area.RestrictedAreaWatch(
+            area,
+            fetch=fetch,
+            on_event=lambda kind, st, now, info, area=area: _ra_event(area, kind, st, now, info),
+            on_status=lambda st, active, now, nxt, area=area: _ra_update_board(area, st, active, now, nxt),
+            on_error=lambda msg, area=area: _ra_error(area, msg),
+            tz=config.TIMEZONE,
+            window=window,
+            idle_interval=config.RA_IDLE_INTERVAL_MIN * 60,
+            active_interval=config.RA_ACTIVE_INTERVAL_MIN * 60,
+            state_path=config.RA_STATE_FILE,
+        )
+        _ra_watches[area] = watch
+        threading.Thread(
+            target=watch.run, args=(state.stop_event,), daemon=True, name=f"ra-{area}"
+        ).start()
+
+
+def _ra_command_text(arg: str) -> str:
+    areas = [arg.strip().upper()] if arg.strip() else list(config.RA_WATCH)
+    if not config.NAIPS_CONFIGURED:
+        return "⚠ NAIPS not configured — set <code>NAIPS_USERNAME</code> and <code>NAIPS_PASSWORD</code>."
+    try:
+        result = restricted_area.fetch_status(areas)
+    except restricted_area.NaipsError as exc:
+        return f"⚠ NAIPS: {html.escape(str(exc))}"
+    now = datetime.now(timezone.utc)
+    lines = []
+    for area in areas:
+        st = result.get(area)
+        if st is None:
+            lines.append(f"<b>{html.escape(area)}</b> — no status returned")
+            continue
+        active = st.is_active(now)
+        current = st.active_period(now)
+        head = "\U0001f534 ACTIVE" if active else "\U0001f7e2 deactivated"
+        lines.append(f"<b>{html.escape(_ra_label(area))}</b> — {head}")
+        if current:
+            lines.append(f"   until {_ra_local(current.end, True)} · {html.escape(st.limits(current))}"
+                         + (f" · NOTAM {current.notam}" if current.notam else ""))
+        for p in [p for p in st.periods if p.start > now][:3]:
+            lines.append(f"   next: {html.escape(_ra_period_line(st, p))}")
+        watch = _ra_watches.get(area)
+        if watch is not None:
+            lines.append(f"   watching {config.RA_WATCH_HOURS}, "
+                         f"{int(config.RA_IDLE_INTERVAL_MIN)} min idle / "
+                         f"{int(config.RA_ACTIVE_INTERVAL_MIN)} min while active")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Telegram command listener (bidirectional control)
 # ---------------------------------------------------------------------------
@@ -2902,6 +3148,9 @@ def _handle_command(
             "/predict on|off — predicted-entry alerts\n"
             "/heard QFA412 — recent radio mentions of a callsign\n"
             "/digest — post the daily digest now\n"
+            "\n<b>Restricted areas (NAIPS)</b>\n"
+            "/ra — R609 Evans Head status now\n"
+            "/ra R625A — any restricted area's status\n\n"
             "/pause — suspend all transcription & forwarding\n"
             "/resume — restart transcription & forwarding\n"
             "/help — this message"
@@ -3167,6 +3416,9 @@ def _handle_command(
                 f"   {html.escape(r['text'][:120])}"
             )
         respond("\n".join(lines))
+
+    elif cmd in ("ra", "r609"):
+        respond(_ra_command_text("R609" if cmd == "r609" else arg))
 
     elif cmd == "digest":
         if _post_digest():
@@ -3721,6 +3973,7 @@ def main() -> None:
     if not args.no_adsb:
         _init_adsb_board_messages(state)
         _init_airspace_board()
+    _init_ra_boards()
 
     with display:
         global _discord_outbox, _transcriber_ref, _adsb_poller, _adsb_live_cards
@@ -3811,6 +4064,9 @@ def main() -> None:
                     name="adsb-web",
                 ).start()
                 _announce_map_urls()
+
+        if config.RA_WATCH_ENABLED:
+            _start_ra_watches(state)
 
         if config.DISCORD_ENABLED and config.DIGEST_TIME:
             threading.Thread(

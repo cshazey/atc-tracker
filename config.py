@@ -292,19 +292,39 @@ KEYWORDS_EMERGENCY = [
     "MAYDAY",
     "PAN PAN",
     "PAN-PAN",
-    "EMERGENCY",
+    "DECLARING AN EMERGENCY",
+    "DECLARE AN EMERGENCY",
+    "DECLARING EMERGENCY",
+    "FUEL EMERGENCY",
+    "MEDICAL EMERGENCY",
     "SQUAWK 7700",
     "SQUAWK 7600",
     "SQUAWK 7500",
+    "SQUAWKING 7700",
+    "SQUAWKING 7600",
+    "SQUAWKING 7500",
     "7700",
     "7600",
-    "7500",
-    "GUARD",
     "DISTRESS",
-    "FUEL EMERGENCY",
 ]
 
+# Terms that used to ping @here and were almost always Whisper mishearings
+# (Oct 2026, every one of them false):
+#   GUARD     — "good day" comes out as "Coast Guard" / "back off guard" /
+#               "Tower Guard". Only the explicit frequency is kept, unpinged.
+#   7500      — the VFR cruising altitude ("northbound on the 7500"). The
+#               hijack code still alerts when it follows "squawk".
+#   EMERGENCY — bare, it fired on "emergency change approved" (frequency
+#               change). Declared emergencies are matched above; the bare
+#               word still posts to #alerts, just without the ping.
+# 7700 and 7600 stay bare: neither is a standard cruising altitude.
+
 KEYWORDS_INTEREST = [
+    # Demoted from the @here tier — see above.
+    "EMERGENCY",
+    "GUARD FREQUENCY",
+    "121.5",
+    "ONE TWO ONE DECIMAL FIVE",
     # Military types
     "MILITARY",
     "RAAF",
@@ -793,3 +813,29 @@ ADSB_ENABLED = bool(
 # HuggingFace token — required to download Whisper models.
 # Get a free token at https://huggingface.co/settings/tokens (read-only is fine).
 HUGGINGFACE_TOKEN = os.environ.get("HUGGINGFACE_TOKEN", "")
+
+# ---------------------------------------------------------------------------
+# Restricted-area watch (restricted_area.py)
+#
+# Polls NAIPS for R609 — the Evans Head Air Weapons Range — during the watch
+# window and pings @here when it activates or deactivates. Once active it is
+# re-checked every RA_ACTIVE_INTERVAL_MIN until NAIPS shows it deactivated.
+# Each area posts to DISCORD_CHANNEL_<AREA>_ACTIVITY (falls back to the
+# airspace channel) and is mirrored to #alerts.
+# ---------------------------------------------------------------------------
+RA_WATCH = _csv("RA_WATCH", "R609")
+RA_LABELS = {"R609": "Evans Head Air Weapons Range"}
+RA_WATCH_HOURS = _str("RA_WATCH_HOURS", "07:00-19:00")
+RA_IDLE_INTERVAL_MIN = _num("RA_IDLE_INTERVAL_MIN", 30)
+RA_ACTIVE_INTERVAL_MIN = _num("RA_ACTIVE_INTERVAL_MIN", 15)
+RA_STATE_FILE = _str("RA_STATE_FILE", os.path.join(_DATA_DIR, "ra_state.json"))
+RA_DISCORD_CHANNELS = {
+    area: (os.environ.get(f"DISCORD_CHANNEL_{area}_ACTIVITY", "").strip()
+           or DISCORD_CHANNEL_AIRSPACE)
+    for area in RA_WATCH
+}
+NAIPS_CONFIGURED = bool(
+    (os.environ.get("NAIPS_USERNAME", "").strip() or os.environ.get("NAIPS_USER_ID", "").strip())
+    and os.environ.get("NAIPS_PASSWORD", "").strip()
+)
+RA_WATCH_ENABLED = bool(_flag("RA_WATCH_ENABLED", "1") and RA_WATCH and NAIPS_CONFIGURED and DISCORD_ENABLED)

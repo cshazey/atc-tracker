@@ -25,3 +25,7 @@ data/*.db-shm
 
 # Timestamped .env backups — these contain real credentials.
 .env.backup-*
+
+# Restricted-area watch state (last known active/inactive per area).
+data/ra_state.json
+data/ra_state.json.tmp
