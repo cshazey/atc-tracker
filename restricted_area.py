@@ -30,6 +30,7 @@ import json
 import os
 import re
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, time as dtime, timedelta, timezone
 from typing import Callable, Optional
@@ -253,14 +254,30 @@ def parse_response(xml_text: str) -> dict[str, RaStatus]:
     return out
 
 
+def _short_error(exc: Exception) -> str:
+    """Boil urllib3's nested retry message down to the part a human needs."""
+    text = str(exc)
+    if "NameResolutionError" in text or "Failed to resolve" in text:
+        return "DNS lookup for www.airservicesaustralia.com failed (network/DNS outage on this host)"
+    if isinstance(exc, requests.Timeout):
+        return "request timed out"
+    m = re.search(r"Caused by (\w+)\(", text)
+    return m.group(1) if m else text[:200]
+
+
 def fetch_status(
     areas: list[str],
     credentials: Optional[tuple[str, str]] = None,
     timeout: float = 30.0,
+    retry_delays: tuple[float, ...] = (2.0, 5.0, 10.0),
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, RaStatus]:
     """Ask NAIPS for the next 24 h of status for up to five restricted areas.
 
-    Raises NaipsError with a scrubbed message on any failure.
+    Connection-level failures (DNS lookups, resets, timeouts) are retried after
+    each of `retry_delays` — the host's resolver drops out for a few seconds at
+    a time, and one blip shouldn't fail the check. Raises NaipsError with a
+    scrubbed message on any failure that survives the retries.
     """
     credentials = credentials or credentials_from_env()
     if credentials is None:
@@ -269,18 +286,26 @@ def fetch_status(
     invalid = validation_error(user, secret)
     if invalid:
         raise NaipsError(invalid)
-    try:
-        # requests verifies TLS against certifi. Never disable that here — the
-        # request body carries the NAIPS password.
-        resp = requests.post(
-            ENDPOINT,
-            data=build_request(areas, user, secret),
-            headers={"Content-Type": "text/xml; charset=utf-8",
-                     "SOAPAction": "restricted-area-status"},
-            timeout=timeout,
-        )
-    except requests.RequestException as exc:
-        raise NaipsError(_scrub(f"NAIPS unreachable: {exc}", user, secret)) from None
+    body = build_request(areas, user, secret)
+    for attempt in range(len(retry_delays) + 1):
+        try:
+            # requests verifies TLS against certifi. Never disable that here — the
+            # request body carries the NAIPS password.
+            resp = requests.post(
+                ENDPOINT,
+                data=body,
+                headers={"Content-Type": "text/xml; charset=utf-8",
+                         "SOAPAction": "restricted-area-status"},
+                timeout=timeout,
+            )
+            break
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            if attempt < len(retry_delays):
+                sleep(retry_delays[attempt])
+                continue
+            raise NaipsError(_scrub(f"NAIPS unreachable: {_short_error(exc)}", user, secret)) from None
+        except requests.RequestException as exc:
+            raise NaipsError(_scrub(f"NAIPS unreachable: {exc}", user, secret)) from None
     if resp.status_code != 200 and "Envelope" not in resp.text[:500]:
         raise NaipsError(_scrub(f"NAIPS HTTP {resp.status_code}: {resp.text[:300]}", user, secret))
     try:
@@ -337,6 +362,7 @@ class RestrictedAreaWatch:
         idle_interval: float = 1800.0,
         active_interval: float = 900.0,
         error_retry: float = 300.0,
+        error_threshold: int = 3,
         state_path: str = "",
     ):
         self.area = area.upper()
@@ -349,6 +375,8 @@ class RestrictedAreaWatch:
         self.idle_interval = idle_interval
         self.active_interval = active_interval
         self.error_retry = error_retry
+        self.error_threshold = max(1, error_threshold)
+        self._error_count = 0
         self._state_path = state_path
         self._lock = threading.Lock()
         self.last_status: Optional[RaStatus] = None
@@ -467,13 +495,17 @@ class RestrictedAreaWatch:
             status = self._fetch()
         except Exception as exc:
             self.last_error = str(exc)
-            if not self._error_reported:
+            self._error_count += 1
+            # Brief outages are absorbed silently; only a failure that
+            # persists across `error_threshold` checks is worth a message.
+            if not self._error_reported and self._error_count >= self.error_threshold:
                 self._error_reported = True
                 self._on_error(self.last_error)
             return self.error_retry
         if self._error_reported:
             self._on_error("")   # recovered
         self._error_reported = False
+        self._error_count = 0
         self.last_error = ""
 
         active = status.is_active(now)
