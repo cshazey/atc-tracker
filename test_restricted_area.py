@@ -178,10 +178,57 @@ naips.fail = True
 delay = watch.step(t0)
 check("NAIPS failure retries in 5 min", delay, 300)
 watch.step(t0 + timedelta(minutes=5))
+check("a brief outage is not reported", errors, [])
+watch.step(t0 + timedelta(minutes=10))
+watch.step(t0 + timedelta(minutes=15))
 check("failure reported once per outage", len(errors), 1)
 naips.fail = False
-watch.step(t0 + timedelta(minutes=10))
+watch.step(t0 + timedelta(minutes=20))
 check("recovery reported with an empty message", errors[-1], "")
+
+watch, naips, events, errors = make_watch()
+naips.fail = True
+watch.step(t0)
+watch.step(t0 + timedelta(minutes=5))
+naips.fail = False
+watch.step(t0 + timedelta(minutes=10))
+check("a blip that recovers stays silent", errors, [])
+
+section("Fetch retries")
+import requests as _rq
+_real_post = _rq.post
+_attempts: list = []
+_slept: list = []
+
+def _flaky_post(*a, **kw):
+    _attempts.append(1)
+    if len(_attempts) < 3:
+        raise _rq.ConnectionError("Failed to resolve 'www.airservicesaustralia.com' ([Errno 8] nodename nor servname provided)")
+    class _Resp:
+        status_code = 500
+        text = "boom"
+    return _Resp()
+
+_rq.post = _flaky_post
+try:
+    try:
+        R.fetch_status(["R609"], credentials=("ABC123", "secretpw1"), sleep=_slept.append)
+    except R.NaipsError as exc:
+        check("retries a DNS blip then reaches NAIPS", str(exc).startswith("NAIPS HTTP 500"), True)
+    check("two retries before success", (len(_attempts), _slept), (3, [2.0, 5.0]))
+
+    def _dead_post(*a, **kw):
+        raise _rq.ConnectionError("HTTPSConnectionPool(...): Max retries exceeded (Caused by NameResolutionError(\"Failed to resolve 'www.airservicesaustralia.com'\"))")
+    _rq.post = _dead_post
+    _slept.clear()
+    try:
+        R.fetch_status(["R609"], credentials=("ABC123", "secretpw1"), sleep=_slept.append)
+        check("persistent DNS failure raises", False, True)
+    except R.NaipsError as exc:
+        check("persistent DNS failure gives a short message", "DNS lookup" in str(exc) and "HTTPSConnectionPool" not in str(exc), True)
+    check("gives up after the retry schedule", _slept, [2.0, 5.0, 10.0])
+finally:
+    _rq.post = _real_post
 
 section("Restart does not re-alert")
 with tempfile.TemporaryDirectory() as tmp:

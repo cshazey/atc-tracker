@@ -2828,8 +2828,11 @@ def _ra_error(area: str, message: str) -> None:
         if watch is not None and watch.last_status is not None:
             _ra_update_board(area, watch.last_status, bool(watch.active),
                              watch.last_checked, None, message)
-    elif _display_ref is not None:
-        _display_ref.log(Text(f"✅ NAIPS {area} reachable again", style="dim green"))
+    else:
+        if _display_ref is not None:
+            _display_ref.log(Text(f"✅ NAIPS {area} reachable again", style="dim green"))
+        _enqueue_discord(DISCORD_COMMANDS_CHANNEL_ID,
+                         content=f"✅ NAIPS check for **{area}** reachable again")
 
 
 def _start_ra_watches(state: SharedState) -> None:
@@ -3586,8 +3589,11 @@ def _discord_command_listener(state: SharedState) -> None:
                         continue
                     if msg.get("author", {}).get("bot"):
                         continue
-                    text = (msg.get("content") or "").strip()
-                    _handle_command(text, state, respond=_discord_respond, source="Discord")
+                    # One message may hold several commands, one per line.
+                    for line in (msg.get("content") or "").splitlines():
+                        line = line.strip()
+                        if line.startswith("/"):
+                            _handle_command(line, state, respond=_discord_respond, source="Discord")
                 seed_failed = False
         except Exception as exc:
             if not state.stop_event.is_set():
