@@ -61,19 +61,24 @@ _HEADERS = {
     "icy-metadata": "0",
     "origin": "https://www.liveatc.net",
     # Cloudflare fronts d.liveatc.net and 403s requests without a browser-ish
-    # referer/UA pair. Both headers are required for the redirector to answer.
+    # referer/UA pair. Both are required (the UA comes from impersonate) for the redirector to answer.
     "referer": "https://www.liveatc.net/",
     "pragma": "no-cache",
     "priority": "u=1, i",
-    "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Brave";v="150"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"macOS"',
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
     "sec-fetch-site": "same-site",
     "sec-gpc": "1",
-    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+    # No user-agent / sec-ch-ua here: curl_cffi's impersonate (see
+    # STREAM_IMPERSONATE) sets ones that match its TLS fingerprint, and a
+    # hardcoded Chrome version would contradict it.
 }
+
+# Browser TLS fingerprint curl_cffi presents when fetching streams. LiveATC's
+# edges reset connections whose TLS handshake doesn't look like a browser, so a
+# plain Python HTTP client can't stream at all. impersonate also supplies a
+# matching User-Agent and sec-ch-ua headers, which is why _HEADERS carries none.
+STREAM_IMPERSONATE = _str("STREAM_IMPERSONATE", "chrome")
 
 # LiveATC's redirector. Given a mount name it 302s to whichever edge host is
 # currently serving that mount, which is what the .pls playlists on the site

@@ -39,6 +39,7 @@ import miniaudio
 import numpy as np
 from scipy.signal import butter, sosfilt
 import requests
+from curl_cffi import requests as cffi_requests
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -73,6 +74,7 @@ from config import (
     REPEAT_NGRAM_MAX_WORDS,
     REPEAT_NGRAM_THRESHOLD,
     STREAMS,
+    STREAM_IMPERSONATE,
     STREAM_STALL_TIMEOUT_SEC,
     VAD_ADAPTIVE,
     VAD_CHUNK_FRAMES,
@@ -511,31 +513,72 @@ class LiveATCSource(miniaudio.StreamableSource):
         self._thread.start()
 
     def _fetch(self, url: str, headers: dict):
+        resp = None
         try:
+            # curl_cffi, not requests: LiveATC's edges (s1-bos etc.) fingerprint
+            # the TLS handshake and reset any connection that doesn't look like
+            # a real browser. Python's OpenSSL handshake is reset every time,
+            # whatever headers it sends; impersonate="chrome" makes the
+            # handshake (and UA / sec-ch-ua headers) match Chrome.
+            #
             # allow_redirects is the point of using d.liveatc.net: it 302s to
             # whichever edge currently serves the mount.
-            with requests.get(
-                url, headers=headers, stream=True, timeout=30, allow_redirects=True
-            ) as resp:
-                resp.raise_for_status()
-                self.resolved_url = resp.url
-                for chunk in resp.iter_content(chunk_size=4096):
-                    if self._stop.is_set():
-                        return
-                    if not chunk:
-                        continue
-                    with self._cond:
-                        self.last_data_at = time.monotonic()
-                        self._deque.append(chunk)
-                        self._deque_bytes += len(chunk)
-                        while self._deque_bytes > self._BUFFER_MAX and self._deque:
-                            dropped = self._deque.popleft()
-                            self._deque_bytes -= len(dropped)
-                        self._cond.notify_all()
+            resp = cffi_requests.get(
+                url, headers=headers, stream=True, timeout=30,
+                allow_redirects=True, impersonate=STREAM_IMPERSONATE,
+            )
+            resp.raise_for_status()
+            self.resolved_url = resp.url
+            content_type = (resp.headers.get("content-type") or "").lower()
+            if content_type.startswith("text/"):
+                # A Cloudflare challenge or error page. Without this check
+                # miniaudio only says "failed to init decoder (-203)".
+                raise IOError(
+                    f"LiveATC sent a web page ({content_type}), not audio — "
+                    "likely a bot challenge or a dead mount"
+                )
+            for chunk in resp.iter_content(chunk_size=4096):
+                if self._stop.is_set():
+                    return
+                if not chunk:
+                    continue
+                with self._cond:
+                    self.last_data_at = time.monotonic()
+                    self._deque.append(chunk)
+                    self._deque_bytes += len(chunk)
+                    while self._deque_bytes > self._BUFFER_MAX and self._deque:
+                        dropped = self._deque.popleft()
+                        self._deque_bytes -= len(dropped)
+                    self._cond.notify_all()
+            raise IOError("stream ended")
         except Exception as exc:
             with self._cond:
                 self._error = exc
                 self._cond.notify_all()
+        finally:
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+
+    def wait_ready(self, timeout: float) -> None:
+        """Block until the first audio arrives; raise the real fetch error if not.
+
+        miniaudio reads the stream header inside stream_any(), and any exception
+        from read() there is swallowed into an opaque "failed to init decoder
+        (-203)". Waiting here first means a reset, 403 or challenge page is
+        reported as itself.
+        """
+        deadline = time.monotonic() + timeout
+        with self._cond:
+            while not self._deque and self._error is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise IOError(f"no audio within {timeout:.0f}s of connecting")
+                self._cond.wait(timeout=min(remaining, 1.0))
+            if not self._deque and self._error is not None:
+                raise IOError(f"Stream fetch error: {self._error}") from self._error
 
     def read(self, num_bytes: int) -> bytes:
         result = bytearray()
@@ -573,6 +616,12 @@ class LiveATCSource(miniaudio.StreamableSource):
                         leftover = chunk[need:]
                         self._deque.appendleft(leftover)
                         self._deque_bytes += len(leftover)
+                # Return as soon as anything is in hand. miniaudio asks for 64 KB
+                # per read, and LiveATC sends ~2 KB/s, so waiting to fill the
+                # request held every decode back by about a minute. A short read
+                # is fine; only an empty one means end of stream.
+                if result:
+                    break
         return bytes(result)
 
     def close(self):
@@ -3683,7 +3732,14 @@ def _candidate_urls(stream_cfg: dict, state: SharedState, attempt: int) -> str:
     if state.has_stream_override(icao):
         return url
     ladder = [url] + [u for u in stream_cfg.get("fallback_urls", []) if u != url]
-    return ladder[attempt % len(ladder)]
+    chosen = ladder[attempt % len(ladder)]
+    if chosen != url:
+        # Hitting an edge directly needs the same cache-buster the redirector
+        # and the site's player add; without it the edge holds the socket open
+        # and sends nothing.
+        sep = "&" if "?" in chosen else "?"
+        chosen = f"{chosen}{sep}nocache={datetime.now(timezone.utc):%Y%m%d%H%M%S}{random.randint(10000, 99999)}"
+    return chosen
 
 
 def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState) -> None:
@@ -3716,6 +3772,7 @@ def _stream_loop(stream_cfg: dict, transcriber: Transcriber, state: SharedState)
             url_version = state.get_stream_url_version(icao)
             url = _candidate_urls(stream_cfg, state, failures)
             source = LiveATCSource(url, headers)
+            source.wait_ready(30)
 
             pcm_gen = miniaudio.stream_any(
                 source,
