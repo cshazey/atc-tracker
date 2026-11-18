@@ -396,6 +396,7 @@ class LiveDisplay:
             title="[bold cyan]ATC Tracker[/bold cyan]",
             border_style="cyan",
         ))
+        header_height = len(buf.getvalue().splitlines())
 
         with self._lock:
             visible = list(self._lines)[-log_visible:]
@@ -416,6 +417,21 @@ class LiveDisplay:
         ))
 
         lines = buf.getvalue().splitlines()
+        # The frame must never be taller than the terminal. log_visible counts
+        # log *entries*, but a long entry wraps onto several lines inside the
+        # panel; if the frame overflows, its top scrolls into scrollback, the
+        # cursor-up below can't reach it, and every redraw leaves another copy
+        # of the header behind. Drop the oldest log lines (just under the log
+        # panel's top border) until it fits, keeping both panels' borders.
+        max_height = max(1, rows - 1)
+        overflow = len(lines) - max_height
+        if overflow > 0:
+            log_body_start = header_height + 1
+            log_body_len = len(lines) - log_body_start - 1  # minus bottom border
+            drop = min(overflow, max(0, log_body_len - 1))
+            del lines[log_body_start:log_body_start + drop]
+            if len(lines) > max_height:  # terminal shorter than the header itself
+                lines = lines[:max_height]
         height = len(lines)
 
         # Build one output string: cursor-up, then overwrite each line
@@ -3905,23 +3921,30 @@ def _preflight_streams(state: SharedState, console: Console) -> list[str]:
     for s in STREAMS:
         icao = s["icao"]
         url = state.get_stream_url(icao)
+        resp = None
         try:
-            with requests.get(
-                url, headers=s["headers"], stream=True, timeout=12, allow_redirects=True
-            ) as resp:
-                name = resp.headers.get("icy-name", "")
-                if resp.status_code == 200:
-                    console.print(
-                        f"[green]  ✓ {icao} {s['name']} — {name or 'live'}[/green] "
-                        f"[dim]{resp.url}[/dim]"
-                    )
-                    results.append(f"✅ {icao} {s['name']} — {name or 'live'}")
-                else:
-                    console.print(f"[red]  ✗ {icao} {s['name']} — HTTP {resp.status_code}[/red]")
-                    results.append(f"❌ {icao} {s['name']} — HTTP {resp.status_code}")
+            # Same client as LiveATCSource: plain requests gets a 403 from the
+            # redirector and a reset from the edges (TLS fingerprinting).
+            resp = cffi_requests.get(
+                url, headers=s["headers"], stream=True, timeout=12,
+                allow_redirects=True, impersonate=STREAM_IMPERSONATE,
+            )
+            name = resp.headers.get("icy-name", "")
+            if resp.status_code == 200:
+                console.print(
+                    f"[green]  ✓ {icao} {s['name']} — {name or 'live'}[/green] "
+                    f"[dim]{resp.url}[/dim]"
+                )
+                results.append(f"✅ {icao} {s['name']} — {name or 'live'}")
+            else:
+                console.print(f"[red]  ✗ {icao} {s['name']} — HTTP {resp.status_code}[/red]")
+                results.append(f"❌ {icao} {s['name']} — HTTP {resp.status_code}")
         except Exception as exc:
             console.print(f"[red]  ✗ {icao} {s['name']} — {exc}[/red]")
             results.append(f"❌ {icao} {s['name']} — {str(exc)[:80]}")
+        finally:
+            if resp is not None:
+                resp.close()
     return results
 
 
